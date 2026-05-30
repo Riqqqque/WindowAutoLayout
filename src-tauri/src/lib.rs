@@ -190,7 +190,7 @@ fn maybe_startup_restore(app: tauri::AppHandle) {
         if delay > 0 {
             tokio_sleep(delay).await;
         }
-        restore_default_in_background(app, None, Some(config.startup.launch_missing_apps));
+        restore_default_in_background(app, None, Some(true));
     });
 }
 

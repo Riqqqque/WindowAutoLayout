@@ -1,6 +1,6 @@
 [package]
 name = "windowautolayout"
-version = "0.1.4"
+version = "0.1.5"
 description = "Windows workspace layout restore utility"
 authors = ["Rique"]
 edition = "2021"

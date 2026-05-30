@@ -31,6 +31,12 @@ pub fn save_config(
 ) -> AppResult<WindowAutoLayoutConfig> {
     next_config.schema_version = crate::models::CONFIG_SCHEMA_VERSION;
     next_config.app_version = crate::models::APP_VERSION.to_string();
+    next_config.startup.launch_missing_apps = true;
+    for profile in &mut next_config.profiles {
+        for app in &mut profile.apps {
+            app.launch_if_missing = true;
+        }
+    }
     startup::set_startup_enabled(next_config.startup.enabled)?;
     config::save(&state.config_dir, &next_config)?;
     *state

@@ -92,7 +92,7 @@ OBS can stay running in the tray with Replay Buffer on. Keep these enabled for t
 - `Pull hidden/tray windows`
 - `Wake running tray apps`
 
-If OBS is already running but Windows reports no main window, WindowAutoLayout asks the existing OBS executable to show itself, waits for the real window, then moves it into the saved layout. Fully missing apps still follow the separate `Launch if missing` setting.
+If OBS is already running but Windows reports no main window, WindowAutoLayout asks the existing OBS executable to show itself, waits for the real window, then moves it into the saved layout. If a configured app is fully closed, Restore tries to start it first and then applies the saved layout.
 
 ## Matching Rules
 

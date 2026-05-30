@@ -186,8 +186,7 @@ fn restore_app(
         AppPresence::RunningWithWindow
     };
     let mut launched = false;
-    let should_launch_missing =
-        matches!(presence, AppPresence::NotRunning) && app.launch_if_missing;
+    let should_launch_missing = matches!(presence, AppPresence::NotRunning);
     let should_wake_running =
         matches!(presence, AppPresence::RunningWithoutWindow) && app.wake_running_process;
 

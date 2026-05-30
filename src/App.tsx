@@ -96,7 +96,7 @@ export default function App() {
       const saved = dirty ? await api.saveConfig(config) : config;
       setConfig(saved);
       setDirty(false);
-      const result = await api.restoreProfile(profile.id, saved.startup.launchMissingApps);
+      const result = await api.restoreProfile(profile.id, true);
       setLastRestore(result);
       setLogs(await api.logs());
       setMessage(`Restore finished: ${result.status}`);

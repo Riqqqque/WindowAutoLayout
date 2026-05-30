@@ -204,7 +204,6 @@ export function AppsPage({
           </div>
 
           <div className="mt-4 grid gap-2 md:grid-cols-3">
-            <Toggle label="Launch if missing" checked={app.launchIfMissing} onChange={(checked) => updateApp(app.id, (app) => ({ ...app, launchIfMissing: checked }))} />
             <Toggle label="Move if already running" checked={app.moveIfRunning} onChange={(checked) => updateApp(app.id, (app) => ({ ...app, moveIfRunning: checked }))} />
             <Toggle label="Force resize" checked={app.forceResize} onChange={(checked) => updateApp(app.id, (app) => ({ ...app, forceResize: checked }))} />
             <Toggle label="Move all matching windows" checked={app.applyToAllMatchingWindows} onChange={(checked) => updateApp(app.id, (app) => ({ ...app, applyToAllMatchingWindows: checked }))} />

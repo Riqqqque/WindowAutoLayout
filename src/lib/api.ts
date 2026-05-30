@@ -12,7 +12,7 @@ export const isTauriRuntime = typeof window !== "undefined" && "__TAURI_INTERNAL
 
 const browserConfig: WindowAutoLayoutConfig = {
   schemaVersion: 2,
-  appVersion: "0.1.4",
+  appVersion: "0.1.5",
   global: {
     defaultMonitorId: "display-2",
     monitorMissingBehavior: "doNothing",
@@ -24,7 +24,7 @@ const browserConfig: WindowAutoLayoutConfig = {
     startMinimizedToTray: true,
     defaultProfileId: "profile-streaming",
     delaySeconds: 8,
-    restoreOnLaunch: false,
+    restoreOnLaunch: true,
     launchMissingApps: true,
     enforceAfterStartup: true,
   },
@@ -55,7 +55,7 @@ const browserConfig: WindowAutoLayoutConfig = {
           launchDelaySeconds: 0,
           detectionTimeoutSeconds: 25,
           retryIntervalMs: 700,
-          launchIfMissing: false,
+          launchIfMissing: true,
           moveIfRunning: true,
           forceResize: true,
           applyToAllMatchingWindows: false,
@@ -80,7 +80,7 @@ const browserConfig: WindowAutoLayoutConfig = {
           launchDelaySeconds: 0,
           detectionTimeoutSeconds: 25,
           retryIntervalMs: 700,
-          launchIfMissing: false,
+          launchIfMissing: true,
           moveIfRunning: true,
           forceResize: true,
           applyToAllMatchingWindows: false,

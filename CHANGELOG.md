@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.5
+
+- Made restore always try to open missing apps in the selected profile before moving them.
+- Simplified app setup so launch behavior is on by default instead of being a per-app trap.
+
 ## 0.1.4
 
 - Let closed apps start from registry app paths, common install folders, PATH, and Start Menu shortcuts when no exact exe path is saved.

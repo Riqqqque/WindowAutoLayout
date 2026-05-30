@@ -113,7 +113,6 @@ export function SettingsPage({ config, monitors, configPath, logPath, onConfigCh
           <Toggle label="Start with Windows" checked={config.startup.enabled} onChange={(checked) => onConfigChange({ ...config, startup: { ...config.startup, enabled: checked } })} />
           <Toggle label="Start minimized to tray" checked={config.startup.startMinimizedToTray} onChange={(checked) => onConfigChange({ ...config, startup: { ...config.startup, startMinimizedToTray: checked } })} />
           <Toggle label="Restore on launch" checked={config.startup.restoreOnLaunch} onChange={(checked) => onConfigChange({ ...config, startup: { ...config.startup, restoreOnLaunch: checked } })} />
-          <Toggle label="Launch missing apps" checked={config.startup.launchMissingApps} onChange={(checked) => onConfigChange({ ...config, startup: { ...config.startup, launchMissingApps: checked } })} />
           <Toggle label="Minimize close button to tray" checked={config.tray.minimizeToTrayOnClose} onChange={(checked) => onConfigChange({ ...config, tray: { ...config.tray, minimizeToTrayOnClose: checked } })} />
           <Toggle label="Enable hotkey" checked={config.hotkey.enabled} onChange={(checked) => onConfigChange({ ...config, hotkey: { ...config.hotkey, enabled: checked } })} />
           <Toggle label="Warn when monitor is missing" checked={config.global.warnWhenMonitorMissing} onChange={(checked) => onConfigChange({ ...config, global: { ...config.global, warnWhenMonitorMissing: checked } })} />

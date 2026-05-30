@@ -21,7 +21,8 @@ pub fn load_or_create(config_dir: &Path) -> AppResult<WindowAutoLayoutConfig> {
     let path = config_file_path(config_dir);
 
     if !path.exists() {
-        let config = WindowAutoLayoutConfig::default();
+        let mut config = WindowAutoLayoutConfig::default();
+        normalize_config(&mut config);
         save(config_dir, &config)?;
         return Ok(config);
     }
@@ -39,6 +40,9 @@ pub fn load_or_create(config_dir: &Path) -> AppResult<WindowAutoLayoutConfig> {
                 config.app_version = APP_VERSION.to_string();
                 should_save = true;
             }
+            if normalize_config(&mut config) {
+                should_save = true;
+            }
             if should_save {
                 save(config_dir, &config)?;
             }
@@ -46,7 +50,8 @@ pub fn load_or_create(config_dir: &Path) -> AppResult<WindowAutoLayoutConfig> {
         }
         Err(error) => {
             backup_config(&path, "corrupt")?;
-            let config = WindowAutoLayoutConfig::default();
+            let mut config = WindowAutoLayoutConfig::default();
+            normalize_config(&mut config);
             save(config_dir, &config)?;
             Err(AppError::Config(format!(
                 "Config was unreadable and was backed up before creating a fresh file: {error}"
@@ -59,10 +64,32 @@ pub fn save(config_dir: &Path, config: &WindowAutoLayoutConfig) -> AppResult<()>
     fs::create_dir_all(config_dir)?;
     let path = config_file_path(config_dir);
     let temp_path = path.with_extension("json.tmp");
-    let payload = serde_json::to_string_pretty(config)?;
+    let mut config = config.clone();
+    normalize_config(&mut config);
+    let payload = serde_json::to_string_pretty(&config)?;
     fs::write(&temp_path, payload)?;
     fs::rename(temp_path, path)?;
     Ok(())
+}
+
+fn normalize_config(config: &mut WindowAutoLayoutConfig) -> bool {
+    let mut changed = false;
+
+    if !config.startup.launch_missing_apps {
+        config.startup.launch_missing_apps = true;
+        changed = true;
+    }
+
+    for profile in &mut config.profiles {
+        for app in &mut profile.apps {
+            if !app.launch_if_missing {
+                app.launch_if_missing = true;
+                changed = true;
+            }
+        }
+    }
+
+    changed
 }
 
 pub fn backup_config(path: &Path, reason: &str) -> AppResult<PathBuf> {
