@@ -494,6 +494,22 @@ fn names_match(expected: &str, actual: &str) -> bool {
     expected == actual
         || expected.trim_end_matches(".exe") == actual
         || expected == actual.trim_end_matches(".exe")
+        || is_github_desktop_name_pair(&expected, &actual)
+}
+
+fn is_github_desktop_name_pair(expected: &str, actual: &str) -> bool {
+    let expected = normalize_process_name(expected);
+    let actual = normalize_process_name(actual);
+    matches!(expected.as_str(), "github" | "githubdesktop") && actual == "githubdesktop"
+}
+
+fn normalize_process_name(name: &str) -> String {
+    name.trim()
+        .trim_end_matches(".exe")
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .flat_map(|character| character.to_lowercase())
+        .collect()
 }
 
 fn title_matches(title: &str, rule: &MatchRule) -> bool {
@@ -626,6 +642,7 @@ mod tests {
         assert!(names_match("Discord.exe", "Discord.exe"));
         assert!(names_match("Discord", "Discord.exe"));
         assert!(names_match("Discord.exe", "Discord"));
+        assert!(names_match("GitHub.exe", "GitHubDesktop.exe"));
     }
 
     #[test]

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.4
+
+- Let closed apps start from registry app paths, common install folders, PATH, and Start Menu shortcuts when no exact exe path is saved.
+- Added a GitHub Desktop preset that can start the app before moving it.
+
 ## 0.1.3
 
 - Fixed OBS restore picking detached dock panels like Stats instead of the real OBS main window.

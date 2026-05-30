@@ -314,6 +314,20 @@ pub fn preset_apps() -> Vec<AppConfig> {
         case_sensitive: false,
     });
 
+    let mut github_desktop = AppConfig::new_preset(
+        "preset-github-desktop",
+        "GitHub Desktop",
+        "GitHubDesktop.exe",
+        LayoutRect::default(),
+    );
+    github_desktop.title_rule = Some(MatchRule {
+        mode: TitleMatchMode::Contains,
+        value: "GitHub Desktop".to_string(),
+        case_sensitive: false,
+    });
+    github_desktop.launch_if_missing = true;
+    github_desktop.detection_timeout_seconds = 45;
+
     vec![
         obs,
         AppConfig::new_preset(
@@ -352,6 +366,7 @@ pub fn preset_apps() -> Vec<AppConfig> {
             "msedge.exe",
             LayoutRect::default(),
         ),
+        github_desktop,
     ]
 }
 

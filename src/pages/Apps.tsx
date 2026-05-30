@@ -49,7 +49,7 @@ export function AppsPage({
       launchDelaySeconds: 0,
       detectionTimeoutSeconds: 25,
       retryIntervalMs: 700,
-      launchIfMissing: false,
+      launchIfMissing: true,
       moveIfRunning: true,
       forceResize: true,
       applyToAllMatchingWindows: false,
