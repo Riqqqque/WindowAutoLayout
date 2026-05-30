@@ -36,15 +36,48 @@ pub fn restore_profile(
     profile_id: Option<String>,
     launch_missing_override: Option<bool>,
 ) -> AppResult<RestoreResult> {
+    restore_profile_inner(
+        config_dir,
+        config,
+        profile_id,
+        launch_missing_override,
+        true,
+    )
+}
+
+pub fn restore_profile_silent(
+    config_dir: &Path,
+    config: &WindowAutoLayoutConfig,
+    profile_id: Option<String>,
+    launch_missing_override: Option<bool>,
+) -> AppResult<RestoreResult> {
+    restore_profile_inner(
+        config_dir,
+        config,
+        profile_id,
+        launch_missing_override,
+        false,
+    )
+}
+
+fn restore_profile_inner(
+    config_dir: &Path,
+    config: &WindowAutoLayoutConfig,
+    profile_id: Option<String>,
+    launch_missing_override: Option<bool>,
+    log_events: bool,
+) -> AppResult<RestoreResult> {
     let started_at = Utc::now();
     let profile = resolve_profile(config, profile_id.as_deref())?.clone();
-    logging::append(
-        config_dir,
-        LogSeverity::Info,
-        Some(&profile.name),
-        None,
-        "Restore started",
-    )?;
+    if log_events {
+        logging::append(
+            config_dir,
+            LogSeverity::Info,
+            Some(&profile.name),
+            None,
+            "Restore started",
+        )?;
+    }
 
     let monitors = monitors::list_monitors()?;
     let monitor = resolve_profile_monitor(config, &profile, &monitors);
@@ -60,13 +93,15 @@ pub fn restore_profile(
             monitor: None,
             results,
         };
-        logging::append(
-            config_dir,
-            LogSeverity::Warn,
-            Some(&profile.name),
-            None,
-            "Restore skipped because the saved monitor is missing",
-        )?;
+        if log_events {
+            logging::append(
+                config_dir,
+                LogSeverity::Warn,
+                Some(&profile.name),
+                None,
+                "Restore skipped because the saved monitor is missing",
+            )?;
+        }
         return Ok(result);
     }
 
@@ -81,6 +116,7 @@ pub fn restore_profile(
             app,
             &app_monitor,
             launch_missing,
+            log_events,
         ));
     }
 
@@ -101,17 +137,19 @@ pub fn restore_profile(
         RestoreStatus::Failed
     };
 
-    logging::append(
-        config_dir,
-        if matches!(status, RestoreStatus::Success) {
-            LogSeverity::Info
-        } else {
-            LogSeverity::Warn
-        },
-        Some(&profile.name),
-        None,
-        format!("Restore finished with status {status:?}"),
-    )?;
+    if log_events {
+        logging::append(
+            config_dir,
+            if matches!(status, RestoreStatus::Success) {
+                LogSeverity::Info
+            } else {
+                LogSeverity::Warn
+            },
+            Some(&profile.name),
+            None,
+            format!("Restore finished with status {status:?}"),
+        )?;
+    }
 
     Ok(RestoreResult {
         profile_id: profile.id,
@@ -173,6 +211,7 @@ fn restore_app(
     app: &AppConfig,
     monitor: &MonitorInfo,
     launch_missing: bool,
+    log_events: bool,
 ) -> AppRestoreResult {
     let mut matched = find_matching_windows(app, None);
     let mut running_processes = matching_processes(app);
@@ -199,33 +238,37 @@ fn restore_app(
         let launched_pid = match launcher::launch_app_with_path(app, launch_path.as_deref()) {
             Ok(pid) => {
                 launched = true;
-                let _ = logging::append(
-                    config_dir,
-                    LogSeverity::Info,
-                    Some(&profile.name),
-                    Some(&app.display_name),
-                    format!(
-                        "{}{}",
-                        if matches!(presence, AppPresence::RunningWithoutWindow) {
-                            "Asked running app to show a window"
-                        } else {
-                            "Launched app"
-                        },
-                        pid.map(|pid| format!(" with PID {pid}"))
-                            .unwrap_or_default()
-                    ),
-                );
+                if log_events {
+                    let _ = logging::append(
+                        config_dir,
+                        LogSeverity::Info,
+                        Some(&profile.name),
+                        Some(&app.display_name),
+                        format!(
+                            "{}{}",
+                            if matches!(presence, AppPresence::RunningWithoutWindow) {
+                                "Asked running app to show a window"
+                            } else {
+                                "Launched app"
+                            },
+                            pid.map(|pid| format!(" with PID {pid}"))
+                                .unwrap_or_default()
+                        ),
+                    );
+                }
                 pid
             }
             Err(AppError::InvalidExecutablePath(path)) => {
                 let message = format!("Invalid executable path: {path}");
-                let _ = logging::append(
-                    config_dir,
-                    LogSeverity::Error,
-                    Some(&profile.name),
-                    Some(&app.display_name),
-                    &message,
-                );
+                if log_events {
+                    let _ = logging::append(
+                        config_dir,
+                        LogSeverity::Error,
+                        Some(&profile.name),
+                        Some(&app.display_name),
+                        &message,
+                    );
+                }
                 return app_result(
                     app,
                     AppRestoreStatus::InvalidExecutablePath,
@@ -235,13 +278,15 @@ fn restore_app(
             }
             Err(error) => {
                 let message = error.to_string();
-                let _ = logging::append(
-                    config_dir,
-                    LogSeverity::Error,
-                    Some(&profile.name),
-                    Some(&app.display_name),
-                    &message,
-                );
+                if log_events {
+                    let _ = logging::append(
+                        config_dir,
+                        LogSeverity::Error,
+                        Some(&profile.name),
+                        Some(&app.display_name),
+                        &message,
+                    );
+                }
                 return app_result(app, AppRestoreStatus::Failed, message, matched);
             }
         };
@@ -278,13 +323,15 @@ fn restore_app(
         } else {
             "No valid matching window was found".to_string()
         };
-        let _ = logging::append(
-            config_dir,
-            LogSeverity::Warn,
-            Some(&profile.name),
-            Some(&app.display_name),
-            &message,
-        );
+        if log_events {
+            let _ = logging::append(
+                config_dir,
+                LogSeverity::Warn,
+                Some(&profile.name),
+                Some(&app.display_name),
+                &message,
+            );
+        }
         return app_result(app, status, message, matched);
     }
 
@@ -325,13 +372,15 @@ fn restore_app(
             } else {
                 AppRestoreStatus::MoveFailed
             };
-            let _ = logging::append(
-                config_dir,
-                LogSeverity::Error,
-                Some(&profile.name),
-                Some(&app.display_name),
-                &message,
-            );
+            if log_events {
+                let _ = logging::append(
+                    config_dir,
+                    LogSeverity::Error,
+                    Some(&profile.name),
+                    Some(&app.display_name),
+                    &message,
+                );
+            }
             return app_result(app, status, message, matched);
         }
     }
@@ -351,13 +400,15 @@ fn restore_app(
     } else {
         format!("Applied layout to {} window(s)", selected.len())
     };
-    let _ = logging::append(
-        config_dir,
-        LogSeverity::Info,
-        Some(&profile.name),
-        Some(&app.display_name),
-        &message,
-    );
+    if log_events {
+        let _ = logging::append(
+            config_dir,
+            LogSeverity::Info,
+            Some(&profile.name),
+            Some(&app.display_name),
+            &message,
+        );
+    }
     app_result(app, status, message, selected)
 }
 

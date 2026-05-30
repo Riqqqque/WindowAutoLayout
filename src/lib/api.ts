@@ -12,7 +12,7 @@ export const isTauriRuntime = typeof window !== "undefined" && "__TAURI_INTERNAL
 
 const browserConfig: WindowAutoLayoutConfig = {
   schemaVersion: 2,
-  appVersion: "0.1.5",
+  appVersion: "0.1.6",
   global: {
     defaultMonitorId: "display-2",
     monitorMissingBehavior: "doNothing",
@@ -30,7 +30,7 @@ const browserConfig: WindowAutoLayoutConfig = {
   },
   tray: { minimizeToTrayOnClose: true, showRestoreStatus: true },
   hotkey: { enabled: true, accelerator: "Ctrl+Alt+L", restoreWithoutOpening: true },
-  enforcement: { enabled: false, durationSeconds: 30, intervalMs: 1000 },
+  enforcement: { enabled: false, profileId: "profile-streaming", durationSeconds: 30, intervalMs: 250 },
   profiles: [
     {
       id: "profile-streaming",
@@ -213,6 +213,9 @@ const realApi = {
     invoke<RestoreResult>("restore_profile", { profileId, launchMissing }),
   lockLayout: (profileId: string | undefined, durationSeconds: number) =>
     invoke<RestoreResult>("lock_layout_temporarily", { profileId, durationSeconds }),
+  setLayoutLock: (enabled: boolean, profileId?: string) =>
+    invoke<boolean>("set_layout_lock", { enabled, profileId }),
+  layoutLockStatus: () => invoke<boolean>("layout_lock_enabled"),
   saveWindowLayout: (profileId: string, appId: string, windowHandle: string) =>
     invoke<WindowAutoLayoutConfig>("save_window_layout", { profileId, appId, windowHandle }),
   saveAllCurrentLayouts: (profileId: string) =>
@@ -251,6 +254,13 @@ const browserApi = {
     })),
   }),
   lockLayout: async (profileId?: string) => browserApi.restoreProfile(profileId),
+  setLayoutLock: async (enabled: boolean, profileId?: string) => {
+    browserLayoutLocked = enabled;
+    browserConfig.enforcement.enabled = enabled;
+    browserConfig.enforcement.profileId = profileId ?? browserConfig.enforcement.profileId;
+    return browserLayoutLocked;
+  },
+  layoutLockStatus: async () => browserLayoutLocked,
   saveWindowLayout: async () => browserConfig,
   saveAllCurrentLayouts: async () => browserConfig,
   logs: async (): Promise<LogEntry[]> => [
@@ -273,5 +283,7 @@ const browserApi = {
   openLogFile: async () => undefined,
   showMainWindow: async () => undefined,
 };
+
+let browserLayoutLocked = false;
 
 export const api = isTauriRuntime ? realApi : browserApi;

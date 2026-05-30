@@ -57,11 +57,12 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
+  const [layoutLocked, setLayoutLocked] = useState(false);
 
   const profile = useMemo(() => (config ? activeProfile(config, selectedProfileId) : null), [config, selectedProfileId]);
 
   const refresh = useCallback(async () => {
-    const [nextConfig, nextMonitors, nextWindows, nextLogs, nextPresets, nextConfigPath, nextLogPath, nextValidation] =
+    const [nextConfig, nextMonitors, nextWindows, nextLogs, nextPresets, nextConfigPath, nextLogPath, nextValidation, nextLayoutLocked] =
       await Promise.all([
         api.getConfig(),
         api.monitors(),
@@ -71,6 +72,7 @@ export default function App() {
         api.configPath(),
         api.logPath(),
         api.validateConfig(),
+        api.layoutLockStatus(),
       ]);
     setConfig(nextConfig);
     setMonitors(nextMonitors);
@@ -80,6 +82,7 @@ export default function App() {
     setConfigPath(nextConfigPath);
     setLogPath(nextLogPath);
     setValidation(nextValidation);
+    setLayoutLocked(nextLayoutLocked);
     setSelectedProfileId((current) => current ?? nextConfig.startup.defaultProfileId ?? nextConfig.profiles[0]?.id ?? null);
     setSelectedAppId((current) => current ?? nextConfig.profiles[0]?.apps[0]?.id ?? null);
     setDirty(false);
@@ -153,17 +156,18 @@ export default function App() {
     }
   }
 
-  async function lockSelected() {
+  async function toggleLayoutLock() {
     if (!config || !profile) return;
     setBusy(true);
     try {
       const saved = dirty ? await api.saveConfig(config) : config;
       setConfig(saved);
       setDirty(false);
-      const result = await api.lockLayout(profile.id, saved.enforcement.durationSeconds);
-      setLastRestore(result);
+      const enabled = await api.setLayoutLock(!layoutLocked, profile.id);
+      setConfig({ ...saved, enforcement: { ...saved.enforcement, enabled, profileId: profile.id } });
+      setLayoutLocked(enabled);
       setLogs(await api.logs());
-      setMessage(`Lock finished: ${result.status}`);
+      setMessage(enabled ? "Layout lock on" : "Layout lock off");
     } catch (error) {
       setMessage(String(error));
     } finally {
@@ -294,7 +298,8 @@ export default function App() {
                   setSelectedAppId(config.profiles.find((item) => item.id === id)?.apps[0]?.id ?? null);
                 }}
                 onRestore={restoreSelected}
-                onLock={lockSelected}
+                onLockToggle={toggleLayoutLock}
+                layoutLocked={layoutLocked}
                 onRefresh={() => refresh().catch((error) => setMessage(String(error)))}
                 onSaveAll={saveAllLayouts}
               />

@@ -2,6 +2,7 @@ mod commands;
 mod config;
 mod errors;
 mod launcher;
+mod layout_lock;
 mod logging;
 mod models;
 mod monitors;
@@ -60,6 +61,7 @@ pub fn run() {
             wire_close_to_tray(app);
             build_tray(app)?;
             maybe_startup_restore(app.handle().clone());
+            maybe_start_layout_lock(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -69,6 +71,7 @@ pub fn run() {
             commands::get_config,
             commands::list_monitors,
             commands::list_windows,
+            commands::layout_lock_enabled,
             commands::lock_layout_temporarily,
             commands::log_path,
             commands::open_log_file,
@@ -78,6 +81,7 @@ pub fn run() {
             commands::save_config,
             commands::save_window_layout,
             commands::set_startup_enabled,
+            commands::set_layout_lock,
             commands::show_main_window,
             commands::startup_enabled,
             commands::validate_current_config
@@ -124,13 +128,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     )?;
     let open = MenuItem::with_id(app, "open", "Open WindowAutoLayout", true, None::<&str>)?;
     let logs = MenuItem::with_id(app, "logs", "Open logs", true, None::<&str>)?;
-    let lock = MenuItem::with_id(
-        app,
-        "lock_30",
-        "Lock layout for 30 seconds",
-        true,
-        None::<&str>,
-    )?;
+    let lock = MenuItem::with_id(app, "layout_lock", "Toggle layout lock", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Exit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&restore, &lock, &open, &logs, &quit])?;
 
@@ -140,7 +138,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "restore_default" => restore_default_in_background(app.clone(), None, Some(true)),
-            "lock_30" => lock_default_in_background(app.clone(), None, 30),
+            "layout_lock" => toggle_layout_lock(app.clone(), None),
             "open" => show_main_window(app),
             "logs" => open_logs(app),
             "quit" => app.exit(0),
@@ -194,6 +192,36 @@ fn maybe_startup_restore(app: tauri::AppHandle) {
     });
 }
 
+fn maybe_start_layout_lock(app: tauri::AppHandle) {
+    let is_startup = std::env::args().any(|arg| arg == "--startup-restore");
+    let state = app.state::<AppState>();
+    let config = match state.config.lock() {
+        Ok(config) => config.clone(),
+        Err(_) => return,
+    };
+    if !config.enforcement.enabled {
+        return;
+    }
+
+    let profile_id = config
+        .enforcement
+        .profile_id
+        .clone()
+        .or_else(|| config.startup.default_profile_id.clone());
+    let delay = if is_startup {
+        config.startup.delay_seconds
+    } else {
+        0
+    };
+
+    tauri::async_runtime::spawn(async move {
+        if delay > 0 {
+            tokio_sleep(delay).await;
+        }
+        let _ = layout_lock::set(&app, true, profile_id);
+    });
+}
+
 async fn tokio_sleep(seconds: u64) {
     tauri::async_runtime::spawn_blocking(move || {
         std::thread::sleep(std::time::Duration::from_secs(seconds))
@@ -222,21 +250,8 @@ fn restore_default_in_background(
     });
 }
 
-fn lock_default_in_background(app: tauri::AppHandle, profile_id: Option<String>, seconds: u64) {
-    let state = app.state::<AppState>();
-    let config_dir = state.config_dir.clone();
-    let config = match state.config.lock() {
-        Ok(config) => config.clone(),
-        Err(_) => return,
-    };
-
-    tauri::async_runtime::spawn(async move {
-        let interval_ms = config.enforcement.interval_ms;
-        let _ = tauri::async_runtime::spawn_blocking(move || {
-            profiles::enforce_profile_for(&config_dir, &config, profile_id, seconds, interval_ms)
-        })
-        .await;
-    });
+fn toggle_layout_lock(app: tauri::AppHandle, profile_id: Option<String>) {
+    let _ = layout_lock::toggle(&app, profile_id);
 }
 
 fn show_main_window(app: &tauri::AppHandle) {

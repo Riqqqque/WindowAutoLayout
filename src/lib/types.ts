@@ -99,6 +99,7 @@ export interface HotkeySettings {
 
 export interface EnforcementSettings {
   enabled: boolean;
+  profileId?: string | null;
   durationSeconds: number;
   intervalMs: number;
 }

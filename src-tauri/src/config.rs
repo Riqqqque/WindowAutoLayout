@@ -89,6 +89,23 @@ fn normalize_config(config: &mut WindowAutoLayoutConfig) -> bool {
         }
     }
 
+    if let Some(profile_id) = &config.enforcement.profile_id {
+        if !config
+            .profiles
+            .iter()
+            .any(|profile| &profile.id == profile_id)
+        {
+            config.enforcement.profile_id = None;
+            changed = true;
+        }
+    }
+
+    let interval_ms = config.enforcement.interval_ms.clamp(150, 250);
+    if config.enforcement.interval_ms != interval_ms {
+        config.enforcement.interval_ms = interval_ms;
+        changed = true;
+    }
+
     changed
 }
 

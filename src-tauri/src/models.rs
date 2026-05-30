@@ -211,6 +211,8 @@ pub struct HotkeySettings {
 #[serde(rename_all = "camelCase")]
 pub struct EnforcementSettings {
     pub enabled: bool,
+    #[serde(default)]
+    pub profile_id: Option<String>,
     pub duration_seconds: u64,
     pub interval_ms: u64,
 }
@@ -404,8 +406,9 @@ impl Default for WindowAutoLayoutConfig {
             },
             enforcement: EnforcementSettings {
                 enabled: false,
+                profile_id: Some(default_profile_id.clone()),
                 duration_seconds: 30,
-                interval_ms: 1000,
+                interval_ms: 250,
             },
             profiles: vec![Profile {
                 id: default_profile_id,

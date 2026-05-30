@@ -1,4 +1,4 @@
-import { LockKeyhole, Play, RefreshCw, Save } from "lucide-react";
+import { LockKeyhole, Play, RefreshCw, Save, UnlockKeyhole } from "lucide-react";
 import type { MonitorInfo, Profile, RestoreResult, WindowAutoLayoutConfig, WindowInfo } from "../lib/types";
 import { monitorLabel } from "../lib/helpers";
 import { StatusBadge } from "../components/StatusBadge";
@@ -13,9 +13,10 @@ interface DashboardProps {
   lastRestore?: RestoreResult | null;
   validation: string[];
   busy: boolean;
+  layoutLocked: boolean;
   onProfileChange: (profileId: string) => void;
   onRestore: () => void;
-  onLock: () => void;
+  onLockToggle: () => void;
   onRefresh: () => void;
   onSaveAll: () => void;
 }
@@ -28,9 +29,10 @@ export function Dashboard({
   lastRestore,
   validation,
   busy,
+  layoutLocked,
   onProfileChange,
   onRestore,
-  onLock,
+  onLockToggle,
   onRefresh,
   onSaveAll,
 }: DashboardProps) {
@@ -56,8 +58,13 @@ export function Dashboard({
             <IconButton label="Restore layout" onClick={onRestore} disabled={busy} variant="solid">
               <Play size={16} />
             </IconButton>
-            <IconButton label="Lock layout for 30 seconds" onClick={onLock} disabled={busy}>
-              <LockKeyhole size={16} />
+            <IconButton
+              label={layoutLocked ? "Unlock layout" : "Lock layout"}
+              onClick={onLockToggle}
+              disabled={busy}
+              variant={layoutLocked ? "solid" : "ghost"}
+            >
+              {layoutLocked ? <LockKeyhole size={16} /> : <UnlockKeyhole size={16} />}
             </IconButton>
             <IconButton label="Refresh" onClick={onRefresh}>
               <RefreshCw size={16} />

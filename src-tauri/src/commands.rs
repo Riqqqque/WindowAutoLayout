@@ -5,7 +5,7 @@ use tauri::{AppHandle, Manager, State};
 use crate::{
     config,
     errors::{AppError, AppResult},
-    logging,
+    layout_lock, logging,
     models::{
         preset_apps, AppConfig, LogEntry, LogSeverity, MonitorInfo, RestoreResult,
         WindowAutoLayoutConfig, WindowInfo,
@@ -124,6 +124,20 @@ pub async fn lock_layout_temporarily(
     })
     .await
     .map_err(|error| AppError::Config(format!("Lock task failed: {error}")))?
+}
+
+#[tauri::command]
+pub fn set_layout_lock(
+    app: AppHandle,
+    enabled: bool,
+    profile_id: Option<String>,
+) -> AppResult<bool> {
+    layout_lock::set(&app, enabled, profile_id)
+}
+
+#[tauri::command]
+pub fn layout_lock_enabled(app: AppHandle) -> AppResult<bool> {
+    layout_lock::enabled(&app)
 }
 
 #[tauri::command]

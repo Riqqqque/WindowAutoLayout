@@ -88,18 +88,10 @@ export function SettingsPage({ config, monitors, configPath, logPath, onConfigCh
               onChange={(event) => onConfigChange({ ...config, hotkey: { ...config.hotkey, accelerator: event.target.value } })}
             />
           </Field>
-          <Field label="Enforcement duration seconds">
+          <Field label="Lock interval ms">
             <NumberInput
-              min={1}
-              value={config.enforcement.durationSeconds}
-              onChange={(event) =>
-                onConfigChange({ ...config, enforcement: { ...config.enforcement, durationSeconds: Number(event.target.value) } })
-              }
-            />
-          </Field>
-          <Field label="Enforcement interval ms">
-            <NumberInput
-              min={250}
+              min={150}
+              max={250}
               step={50}
               value={config.enforcement.intervalMs}
               onChange={(event) =>

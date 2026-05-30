@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "appVersion": "0.1.5",
+  "appVersion": "0.1.6",
   "global": {
     "defaultMonitorId": null,
     "monitorMissingBehavior": "doNothing",
@@ -27,8 +27,9 @@
   },
   "enforcement": {
     "enabled": false,
+    "profileId": "profile-streaming",
     "durationSeconds": 30,
-    "intervalMs": 1000
+    "intervalMs": 250
   },
   "profiles": [
     {

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.6
+
+- Added a persistent layout lock toggle that keeps reapplying the selected profile while it is on.
+- Remembered the locked profile and made the lock fast enough to bring windows back after Show Desktop or accidental minimize/move actions.
+
 ## 0.1.5
 
 - Made restore always try to open missing apps in the selected profile before moving them.

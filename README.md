@@ -27,9 +27,10 @@ Highlights:
 - Finds top-level windows with title, class name, process name, PID, bounds, and executable path when Windows exposes it.
 - Saves window positions relative to the chosen monitor, so layouts survive monitor offsets better.
 - Restores profiles by launching missing apps, waiting for real matching windows, and moving/resizing them with Win32 APIs.
+- Keeps a selected profile locked while the lock is on, so Show Desktop and accidental minimize/move actions get snapped back.
 - Pulls minimized or hidden tray windows forward before deciding an app is missing.
 - Wakes running tray apps that have no top-level window yet, which covers OBS sitting in the tray for Replay Buffer.
-- Supports editable app presets, multiple profiles, startup restore, temporary layout locking, tray restore, logs, and a global hotkey.
+- Supports editable app presets, multiple profiles, startup restore, layout locking, tray restore, logs, and a global hotkey.
 - Stores config and logs locally as JSON. No telemetry, accounts, analytics, or background network calls.
 
 ## Download
