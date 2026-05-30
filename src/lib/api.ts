@@ -12,7 +12,7 @@ export const isTauriRuntime = typeof window !== "undefined" && "__TAURI_INTERNAL
 
 const browserConfig: WindowAutoLayoutConfig = {
   schemaVersion: 2,
-  appVersion: "0.1.2",
+  appVersion: "0.1.3",
   global: {
     defaultMonitorId: "display-2",
     monitorMissingBehavior: "doNothing",
@@ -47,7 +47,7 @@ const browserConfig: WindowAutoLayoutConfig = {
           arguments: [],
           workingDirectory: null,
           processName: "obs64.exe",
-          titleRule: null,
+          titleRule: { mode: "startsWith", value: "OBS", caseSensitive: false },
           className: null,
           targetMonitorId: null,
           layout: { x: 0, y: 0, width: 1280, height: 720 },

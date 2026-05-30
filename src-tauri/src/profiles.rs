@@ -410,8 +410,10 @@ fn window_matches_app(window: &WindowInfo, app: &AppConfig, launched_pid: Option
         return false;
     }
 
+    let configured_process_name = configured_process_name(app);
     let process_matches = launched_pid == Some(window.process_id)
-        || configured_process_name(app)
+        || configured_process_name
+            .as_ref()
             .map(|expected| names_match(&expected, &window.process_name))
             .unwrap_or(false)
         || app
@@ -422,6 +424,12 @@ fn window_matches_app(window: &WindowInfo, app: &AppConfig, launched_pid: Option
             .unwrap_or(false);
 
     if !process_matches {
+        return false;
+    }
+
+    if app.title_rule.is_none()
+        && is_known_process_tool_window(window, configured_process_name.as_deref())
+    {
         return false;
     }
 
@@ -515,6 +523,26 @@ fn is_obvious_helper_window(window: &WindowInfo) -> bool {
         || class.contains("toast")
         || class.contains("shadow")
         || title.contains("splash")
+}
+
+fn is_known_process_tool_window(
+    window: &WindowInfo,
+    configured_process_name: Option<&str>,
+) -> bool {
+    let is_obs = names_match("obs64.exe", &window.process_name)
+        || configured_process_name
+            .map(|process_name| names_match("obs64.exe", process_name))
+            .unwrap_or(false);
+
+    is_obs && !is_obs_main_window(window)
+}
+
+fn is_obs_main_window(window: &WindowInfo) -> bool {
+    let title = window.title.trim().to_ascii_lowercase();
+    title == "obs"
+        || title.starts_with("obs ")
+        || title.starts_with("obs-")
+        || title.contains(" - profile:")
 }
 
 fn resolve_app_monitor(
@@ -702,5 +730,81 @@ mod tests {
         };
 
         assert!(!window_matches_app(&window, &app, None));
+    }
+
+    #[test]
+    fn accepts_obs_main_window_without_explicit_title_rule() {
+        let mut app =
+            AppConfig::new_preset("obs", "OBS Studio", "obs64.exe", LayoutRect::default());
+        app.title_rule = None;
+        let window = WindowInfo {
+            handle: "0x1".into(),
+            title: "OBS 32.1.2 - Profile: Untitled - Scenes: Untitled".into(),
+            class_name: "Qt672QWindowIcon".into(),
+            process_id: 10,
+            process_name: "obs64.exe".into(),
+            executable_path: None,
+            monitor_id: None,
+            x: 0,
+            y: 0,
+            width: 1200,
+            height: 800,
+            is_visible: true,
+            is_minimized: false,
+        };
+
+        assert!(window_matches_app(&window, &app, None));
+    }
+
+    #[test]
+    fn rejects_obs_dock_window_without_explicit_title_rule() {
+        let mut app =
+            AppConfig::new_preset("obs", "OBS Studio", "obs64.exe", LayoutRect::default());
+        app.title_rule = None;
+        let window = WindowInfo {
+            handle: "0x1".into(),
+            title: "Stats".into(),
+            class_name: "Qt672QWindowIcon".into(),
+            process_id: 10,
+            process_name: "obs64.exe".into(),
+            executable_path: None,
+            monitor_id: None,
+            x: 0,
+            y: 0,
+            width: 420,
+            height: 500,
+            is_visible: true,
+            is_minimized: false,
+        };
+
+        assert!(!window_matches_app(&window, &app, None));
+    }
+
+    #[test]
+    fn allows_obs_dock_window_with_explicit_title_rule() {
+        let mut app =
+            AppConfig::new_preset("obs", "OBS Studio", "obs64.exe", LayoutRect::default());
+        app.title_rule = Some(MatchRule {
+            mode: TitleMatchMode::Exact,
+            value: "Stats".into(),
+            case_sensitive: false,
+        });
+        let window = WindowInfo {
+            handle: "0x1".into(),
+            title: "Stats".into(),
+            class_name: "Qt672QWindowIcon".into(),
+            process_id: 10,
+            process_name: "obs64.exe".into(),
+            executable_path: None,
+            monitor_id: None,
+            x: 0,
+            y: 0,
+            width: 420,
+            height: 500,
+            is_visible: true,
+            is_minimized: false,
+        };
+
+        assert!(window_matches_app(&window, &app, None));
     }
 }

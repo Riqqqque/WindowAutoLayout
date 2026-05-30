@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3
+
+- Fixed OBS restore picking detached dock panels like Stats instead of the real OBS main window.
+
 ## 0.1.2
 
 - Let running tray apps wake even when "Launch if missing" is off, so OBS can be pulled back without needing a configured launch path.

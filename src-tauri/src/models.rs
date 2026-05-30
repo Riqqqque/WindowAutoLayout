@@ -297,18 +297,25 @@ pub struct LogEntry {
 }
 
 pub fn preset_apps() -> Vec<AppConfig> {
+    let mut obs = AppConfig::new_preset(
+        "preset-obs",
+        "OBS Studio",
+        "obs64.exe",
+        LayoutRect {
+            x: 0,
+            y: 0,
+            width: 1280,
+            height: 720,
+        },
+    );
+    obs.title_rule = Some(MatchRule {
+        mode: TitleMatchMode::StartsWith,
+        value: "OBS".to_string(),
+        case_sensitive: false,
+    });
+
     vec![
-        AppConfig::new_preset(
-            "preset-obs",
-            "OBS Studio",
-            "obs64.exe",
-            LayoutRect {
-                x: 0,
-                y: 0,
-                width: 1280,
-                height: 720,
-            },
-        ),
+        obs,
         AppConfig::new_preset(
             "preset-discord",
             "Discord",
