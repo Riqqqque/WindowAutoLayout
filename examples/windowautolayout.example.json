@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 2,
+  "appVersion": "0.1.2",
+  "global": {
+    "defaultMonitorId": null,
+    "monitorMissingBehavior": "doNothing",
+    "warnWhenMonitorMissing": true,
+    "advancedMode": false
+  },
+  "startup": {
+    "enabled": false,
+    "startMinimizedToTray": true,
+    "defaultProfileId": "profile-streaming",
+    "delaySeconds": 8,
+    "restoreOnLaunch": false,
+    "launchMissingApps": true,
+    "enforceAfterStartup": true
+  },
+  "tray": {
+    "minimizeToTrayOnClose": true,
+    "showRestoreStatus": true
+  },
+  "hotkey": {
+    "enabled": true,
+    "accelerator": "Ctrl+Alt+L",
+    "restoreWithoutOpening": true
+  },
+  "enforcement": {
+    "enabled": false,
+    "durationSeconds": 30,
+    "intervalMs": 1000
+  },
+  "profiles": [
+    {
+      "id": "profile-streaming",
+      "name": "Streaming",
+      "description": "OBS and Discord on the selected monitor.",
+      "targetMonitorId": null,
+      "startupRestore": true,
+      "enforceAfterRestore": true,
+      "apps": [
+        {
+          "id": "preset-obs",
+          "displayName": "OBS Studio",
+          "executablePath": null,
+          "arguments": [],
+          "workingDirectory": null,
+          "processName": "obs64.exe",
+          "titleRule": null,
+          "className": null,
+          "targetMonitorId": null,
+          "layout": { "x": 0, "y": 0, "width": 1280, "height": 720 },
+          "windowState": "normal",
+          "launchDelaySeconds": 0,
+          "detectionTimeoutSeconds": 25,
+          "retryIntervalMs": 700,
+          "launchIfMissing": false,
+          "moveIfRunning": true,
+          "forceResize": true,
+          "applyToAllMatchingWindows": false,
+          "restoreIfMinimized": true,
+          "pullHiddenWindows": true,
+          "wakeRunningProcess": true,
+          "allowEmptyTitle": false,
+          "notes": null
+        },
+        {
+          "id": "preset-discord",
+          "displayName": "Discord",
+          "executablePath": null,
+          "arguments": [],
+          "workingDirectory": null,
+          "processName": "Discord.exe",
+          "titleRule": null,
+          "className": null,
+          "targetMonitorId": null,
+          "layout": { "x": 1280, "y": 0, "width": 640, "height": 720 },
+          "windowState": "normal",
+          "launchDelaySeconds": 0,
+          "detectionTimeoutSeconds": 25,
+          "retryIntervalMs": 700,
+          "launchIfMissing": false,
+          "moveIfRunning": true,
+          "forceResize": true,
+          "applyToAllMatchingWindows": false,
+          "restoreIfMinimized": true,
+          "pullHiddenWindows": true,
+          "wakeRunningProcess": true,
+          "allowEmptyTitle": false,
+          "notes": null
+        }
+      ]
+    }
+  ]
+}

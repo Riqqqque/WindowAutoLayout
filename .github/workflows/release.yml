@@ -1,0 +1,100 @@
+name: Windows build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Validate release tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $expected = "v$version"
+          if ("${{ github.ref_name }}" -ne $expected) {
+            throw "Tag ${{ github.ref_name }} does not match package version $expected"
+          }
+
+      - name: TypeScript check
+        run: npm run check
+
+      - name: Rust tests
+        run: cargo test
+        working-directory: src-tauri
+
+      - name: Build Windows bundle
+        run: npm run desktop:build
+
+      - name: Write installer checksums
+        shell: pwsh
+        run: |
+          $bundleRoot = "src-tauri/target/release/bundle"
+          Get-ChildItem $bundleRoot -Recurse -File |
+            Where-Object { $_.Extension -in ".exe", ".msi" } |
+            ForEach-Object {
+              $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName
+              "$($hash.Hash)  $($_.Name)" | Set-Content -LiteralPath "$($_.FullName).sha256" -NoNewline
+            }
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: WindowAutoLayout-Windows
+          path: |
+            src-tauri/target/release/bundle/**/*.exe
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*.sha256
+
+      - name: Publish tagged release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $files = Get-ChildItem "src-tauri/target/release/bundle" -Recurse -File |
+            Where-Object { $_.Extension -in ".exe", ".msi", ".sha256" } |
+            ForEach-Object { $_.FullName }
+
+          if (-not $files) {
+            throw "No release files were produced"
+          }
+
+          @(
+            "WindowAutoLayout $tag"
+            ""
+            "Windows installer assets and SHA256 checksums are attached below."
+          ) | Set-Content -LiteralPath release-notes.md
+
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag @files --clobber
+          } else {
+            gh release create $tag @files --title "WindowAutoLayout $tag" --notes-file release-notes.md
+          }
