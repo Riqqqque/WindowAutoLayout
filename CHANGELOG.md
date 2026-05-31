@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.10
+
+- Fixed OBS tray restore by asking OBS through its tray icon before moving the window, matching the manual click that makes OBS repaint correctly.
+- Kept the restored OBS window activated and repainted through the final layout move.
+
 ## 0.1.9
 
 - Fixed OBS tray restore so minimized-to-tray OBS is restored from its existing window instead of starting OBS again.

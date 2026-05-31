@@ -1,14 +1,18 @@
 use std::{thread, time::Duration};
 
-use windows::Win32::{
-    Foundation::{GetLastError, HWND, RECT},
-    Graphics::Gdi::{
-        RedrawWindow, UpdateWindow, RDW_ALLCHILDREN, RDW_FRAME, RDW_INVALIDATE, RDW_UPDATENOW,
-    },
-    UI::WindowsAndMessaging::{
-        BringWindowToTop, IsIconic, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_TOP,
-        SWP_NOACTIVATE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE,
-        SW_SHOW,
+use windows::{
+    core::BOOL,
+    Win32::{
+        Foundation::{GetLastError, HWND, LPARAM, RECT, WPARAM},
+        Graphics::Gdi::{
+            RedrawWindow, UpdateWindow, RDW_ALLCHILDREN, RDW_FRAME, RDW_INVALIDATE, RDW_UPDATENOW,
+        },
+        UI::WindowsAndMessaging::{
+            BringWindowToTop, EnumWindows, GetClassNameW, GetWindowTextW, GetWindowThreadProcessId,
+            IsIconic, PostMessageW, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_TOP,
+            SWP_NOACTIVATE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE,
+            SW_SHOW, WM_APP,
+        },
     },
 };
 
@@ -101,6 +105,32 @@ pub fn show_window_for_restore(hwnd: HWND) {
     wake_painted_window(hwnd);
 }
 
+pub fn activate_qt_tray_icon_for_process(process_id: u32) -> bool {
+    let mut context = TrayWindowSearch {
+        process_id,
+        tray_windows: Vec::new(),
+    };
+    let lparam = LPARAM(&mut context as *mut TrayWindowSearch as isize);
+    let _ = unsafe { EnumWindows(Some(enum_tray_window_proc), lparam) };
+
+    let mut sent = false;
+    for hwnd in context.tray_windows {
+        sent |= unsafe {
+            PostMessageW(
+                Some(hwnd),
+                WM_APP + 101,
+                WPARAM(0),
+                LPARAM(nin_select_message() as isize),
+            )
+            .is_ok()
+        };
+    }
+    if sent {
+        thread::sleep(Duration::from_millis(350));
+    }
+    sent
+}
+
 fn wake_painted_window(hwnd: HWND) {
     unsafe {
         let _ = BringWindowToTop(hwnd);
@@ -123,6 +153,53 @@ fn wake_painted_window(hwnd: HWND) {
         );
         let _ = UpdateWindow(hwnd);
     }
+}
+
+struct TrayWindowSearch {
+    process_id: u32,
+    tray_windows: Vec<HWND>,
+}
+
+unsafe extern "system" fn enum_tray_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    let context = &mut *(lparam.0 as *mut TrayWindowSearch);
+    let mut process_id = 0u32;
+    unsafe {
+        GetWindowThreadProcessId(hwnd, Some(&mut process_id));
+    }
+    if process_id == context.process_id {
+        let class_name = window_class_name(hwnd).to_ascii_lowercase();
+        let title = window_title(hwnd).to_ascii_lowercase();
+        if class_name.contains("trayiconmessagewindowclass")
+            || title.contains("qtrayiconmessagewindow")
+        {
+            context.tray_windows.push(hwnd);
+        }
+    }
+    BOOL(1)
+}
+
+fn window_class_name(hwnd: HWND) -> String {
+    let mut buffer = vec![0u16; 512];
+    let copied = unsafe { GetClassNameW(hwnd, &mut buffer) };
+    if copied <= 0 {
+        String::new()
+    } else {
+        String::from_utf16_lossy(&buffer[..copied as usize])
+    }
+}
+
+fn window_title(hwnd: HWND) -> String {
+    let mut buffer = vec![0u16; 512];
+    let copied = unsafe { GetWindowTextW(hwnd, &mut buffer) };
+    if copied <= 0 {
+        String::new()
+    } else {
+        String::from_utf16_lossy(&buffer[..copied as usize])
+    }
+}
+
+fn nin_select_message() -> u32 {
+    0x0400
 }
 
 pub fn absolute_rect(monitor: &MonitorInfo, layout: &LayoutRect) -> RECT {

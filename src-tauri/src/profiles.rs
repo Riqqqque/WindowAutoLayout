@@ -27,6 +27,7 @@ enum AppPresence {
 
 #[derive(Debug, Clone)]
 struct MatchingProcess {
+    pid: u32,
     executable_path: Option<String>,
 }
 
@@ -41,6 +42,7 @@ pub fn restore_profile(
         config,
         profile_id,
         launch_missing_override,
+        true,
         true,
     )
 }
@@ -57,6 +59,7 @@ pub fn restore_profile_silent(
         profile_id,
         launch_missing_override,
         false,
+        false,
     )
 }
 
@@ -66,6 +69,7 @@ fn restore_profile_inner(
     profile_id: Option<String>,
     launch_missing_override: Option<bool>,
     log_events: bool,
+    activate_visible_windows: bool,
 ) -> AppResult<RestoreResult> {
     let started_at = Utc::now();
     let profile = resolve_profile(config, profile_id.as_deref())?.clone();
@@ -117,6 +121,7 @@ fn restore_profile_inner(
             &app_monitor,
             launch_missing,
             log_events,
+            activate_visible_windows,
         ));
     }
 
@@ -212,6 +217,7 @@ fn restore_app(
     monitor: &MonitorInfo,
     launch_missing: bool,
     log_events: bool,
+    activate_visible_windows: bool,
 ) -> AppRestoreResult {
     let mut matched = find_matching_windows(app, None);
     let mut running_processes = matching_processes(app);
@@ -225,16 +231,67 @@ fn restore_app(
         AppPresence::RunningWithWindow
     };
     let mut launched = false;
+    let mut activate_after_hidden_restore = false;
 
     if launch_missing && should_show_matched_windows(app, &matched) {
         let selected = selected_matching_windows(app, &matched);
+        if should_restore_through_qt_tray(app, &selected) {
+            let mut activated_processes = Vec::new();
+            for window in &selected {
+                if !activated_processes.contains(&window.process_id)
+                    && window_actions::activate_qt_tray_icon_for_process(window.process_id)
+                {
+                    activated_processes.push(window.process_id);
+                }
+            }
+
+            if !activated_processes.is_empty() {
+                if log_events {
+                    let _ = logging::append(
+                        config_dir,
+                        LogSeverity::Info,
+                        Some(&profile.name),
+                        Some(&app.display_name),
+                        "Asked tray icon to restore hidden running window",
+                    );
+                }
+                let restored = wait_for_visible_windows(
+                    app,
+                    None,
+                    app.detection_timeout_seconds,
+                    app.retry_interval_ms,
+                );
+                if restored
+                    .iter()
+                    .any(|window| window.is_visible && !window.is_minimized)
+                {
+                    settle_visible_window(app);
+                    matched = restored;
+                    running_processes = matching_processes(app);
+                    presence = if matched.is_empty() {
+                        if running_processes.is_empty() {
+                            AppPresence::NotRunning
+                        } else {
+                            AppPresence::RunningWithoutWindow
+                        }
+                    } else {
+                        AppPresence::RunningWithWindow
+                    };
+                    activate_after_hidden_restore = true;
+                }
+            }
+        }
+
+        let selected = selected_matching_windows(app, &matched);
         let mut show_error = None;
-        for window in &selected {
-            match windows_enum::parse_handle(&window.handle) {
-                Ok(hwnd) => window_actions::show_window_for_restore(hwnd),
-                Err(error) => {
-                    show_error = Some(error.to_string());
-                    break;
+        if should_show_matched_windows(app, &selected) {
+            for window in &selected {
+                match windows_enum::parse_handle(&window.handle) {
+                    Ok(hwnd) => window_actions::show_window_for_restore(hwnd),
+                    Err(error) => {
+                        show_error = Some(error.to_string());
+                        break;
+                    }
                 }
             }
         }
@@ -250,7 +307,7 @@ fn restore_app(
                 );
             }
         } else {
-            if log_events {
+            if !selected.is_empty() && should_show_matched_windows(app, &selected) && log_events {
                 let _ = logging::append(
                     config_dir,
                     LogSeverity::Info,
@@ -277,15 +334,65 @@ fn restore_app(
             } else {
                 AppPresence::RunningWithWindow
             };
+            activate_after_hidden_restore = true;
+        }
+    }
+
+    let should_wake_running =
+        matches!(presence, AppPresence::RunningWithoutWindow) && app.wake_running_process;
+
+    if matched.is_empty() && launch_missing && should_wake_running && is_obs_app(app) {
+        let mut activated_processes = Vec::new();
+        for process in &running_processes {
+            if !activated_processes.contains(&process.pid)
+                && window_actions::activate_qt_tray_icon_for_process(process.pid)
+            {
+                activated_processes.push(process.pid);
+            }
+        }
+
+        if !activated_processes.is_empty() {
+            if log_events {
+                let _ = logging::append(
+                    config_dir,
+                    LogSeverity::Info,
+                    Some(&profile.name),
+                    Some(&app.display_name),
+                    "Asked tray icon to restore running app",
+                );
+            }
+            let _ = wait_for_visible_windows(
+                app,
+                None,
+                app.detection_timeout_seconds,
+                app.retry_interval_ms,
+            );
+            settle_visible_window(app);
+            matched = find_matching_windows(app, None);
+            running_processes = matching_processes(app);
+            presence = if matched.is_empty() {
+                if running_processes.is_empty() {
+                    AppPresence::NotRunning
+                } else {
+                    AppPresence::RunningWithoutWindow
+                }
+            } else {
+                AppPresence::RunningWithWindow
+            };
+            activate_after_hidden_restore = true;
         }
     }
 
     let should_launch_missing = matches!(presence, AppPresence::NotRunning);
     let should_wake_running =
         matches!(presence, AppPresence::RunningWithoutWindow) && app.wake_running_process;
+    let should_launch_running_process = should_wake_running && !is_obs_app(app);
 
-    if matched.is_empty() && launch_missing && (should_launch_missing || should_wake_running) {
-        let launch_path = if should_wake_running {
+    if matched.is_empty()
+        && launch_missing
+        && (should_launch_missing || should_launch_running_process)
+    {
+        let launch_path = if should_launch_running_process {
             running_process_launch_path(app, &running_processes)
         } else {
             app.executable_path.clone()
@@ -420,7 +527,10 @@ fn restore_app(
             app.force_resize,
             restore_minimized_window,
             pull_hidden_window,
-            pull_hidden_window || restore_minimized_window,
+            pull_hidden_window
+                || restore_minimized_window
+                || activate_after_hidden_restore
+                || activate_visible_windows,
         ) {
             let message = error.to_string();
             let status = if message.to_ascii_lowercase().contains("access") {
@@ -492,6 +602,10 @@ fn should_show_matched_windows(app: &AppConfig, matched: &[WindowInfo]) -> bool 
         && matched
             .iter()
             .all(|window| !window.is_visible || window.is_minimized)
+}
+
+fn should_restore_through_qt_tray(app: &AppConfig, matched: &[WindowInfo]) -> bool {
+    is_obs_app(app) && !matched.is_empty() && matched.iter().all(|window| !window.is_visible)
 }
 
 fn selected_matching_windows(app: &AppConfig, matched: &[WindowInfo]) -> Vec<WindowInfo> {
@@ -610,6 +724,7 @@ fn matching_processes(app: &AppConfig) -> Vec<MatchingProcess> {
         .into_iter()
         .filter(|process| names_match(&expected, &process.name))
         .map(|process| MatchingProcess {
+            pid: process.pid,
             executable_path: processes::query_process_path(process.pid),
         })
         .collect()
@@ -893,6 +1008,32 @@ mod tests {
         };
 
         assert!(!should_show_matched_windows(&app, &[window]));
+    }
+
+    #[test]
+    fn uses_obs_tray_restore_only_for_hidden_windows() {
+        let app = AppConfig::new_preset("obs", "OBS Studio", "obs64.exe", LayoutRect::default());
+        let mut window = WindowInfo {
+            handle: "0x1".into(),
+            title: "OBS Studio".into(),
+            class_name: "QtWindow".into(),
+            process_id: 10,
+            process_name: "obs64.exe".into(),
+            executable_path: None,
+            monitor_id: None,
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+            is_visible: false,
+            is_minimized: false,
+        };
+
+        assert!(should_restore_through_qt_tray(&app, &[window.clone()]));
+
+        window.is_visible = true;
+        window.is_minimized = true;
+        assert!(!should_restore_through_qt_tray(&app, &[window]));
     }
 
     #[test]
