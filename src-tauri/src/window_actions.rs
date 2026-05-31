@@ -30,11 +30,7 @@ pub fn apply_layout(
     let should_show =
         pull_hidden_window || (restore_if_minimized && unsafe { IsIconic(hwnd).as_bool() });
     if should_show {
-        unsafe {
-            let _ = ShowWindow(hwnd, SW_RESTORE);
-            let _ = ShowWindow(hwnd, SW_SHOW);
-        }
-        thread::sleep(Duration::from_millis(120));
+        show_window_for_restore(hwnd);
     }
 
     let rect = absolute_rect(monitor, layout);
@@ -94,6 +90,15 @@ pub fn apply_layout(
     }
 
     Ok(())
+}
+
+pub fn show_window_for_restore(hwnd: HWND) {
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_RESTORE);
+        let _ = ShowWindow(hwnd, SW_SHOW);
+    }
+    thread::sleep(Duration::from_millis(120));
+    wake_painted_window(hwnd);
 }
 
 fn wake_painted_window(hwnd: HWND) {

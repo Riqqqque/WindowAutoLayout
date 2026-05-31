@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.9
+
+- Fixed OBS tray restore so minimized-to-tray OBS is restored from its existing window instead of starting OBS again.
+- Kept OBS restore waiting for the shown window to settle before applying the saved layout.
+
 ## 0.1.8
 
 - Fixed OBS tray restore taking the hidden window shortcut before OBS had a chance to show itself.
