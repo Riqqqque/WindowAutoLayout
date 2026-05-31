@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.7
+
+- Fixed OBS coming back as a white window after restore from the tray by waking and repainting the pulled window before layout finishes.
+- Kept layout lock moves from repeatedly activating already-visible windows.
+
 ## 0.1.6
 
 - Added a persistent layout lock toggle that keeps reapplying the selected profile while it is on.

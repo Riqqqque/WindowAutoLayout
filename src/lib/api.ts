@@ -12,7 +12,7 @@ export const isTauriRuntime = typeof window !== "undefined" && "__TAURI_INTERNAL
 
 const browserConfig: WindowAutoLayoutConfig = {
   schemaVersion: 2,
-  appVersion: "0.1.6",
+  appVersion: "0.1.7",
   global: {
     defaultMonitorId: "display-2",
     monitorMissingBehavior: "doNothing",

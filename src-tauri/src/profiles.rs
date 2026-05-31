@@ -357,14 +357,17 @@ fn restore_app(
                 return app_result(app, AppRestoreStatus::Failed, error.to_string(), matched);
             }
         };
+        let pull_hidden_window = app.pull_hidden_windows && !window.is_visible;
+        let restore_minimized_window = app.restore_if_minimized && window.is_minimized;
         if let Err(error) = window_actions::apply_layout(
             hwnd,
             monitor,
             &app.layout,
             &app.window_state,
             app.force_resize,
-            app.restore_if_minimized,
-            app.pull_hidden_windows,
+            restore_minimized_window,
+            pull_hidden_window,
+            pull_hidden_window || restore_minimized_window,
         ) {
             let message = error.to_string();
             let status = if message.to_ascii_lowercase().contains("access") {

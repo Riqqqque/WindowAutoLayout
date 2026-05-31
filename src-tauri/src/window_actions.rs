@@ -1,8 +1,14 @@
+use std::{thread, time::Duration};
+
 use windows::Win32::{
     Foundation::{GetLastError, HWND, RECT},
+    Graphics::Gdi::{
+        RedrawWindow, UpdateWindow, RDW_ALLCHILDREN, RDW_FRAME, RDW_INVALIDATE, RDW_UPDATENOW,
+    },
     UI::WindowsAndMessaging::{
-        IsIconic, SetWindowPos, ShowWindow, HWND_TOP, SWP_NOACTIVATE, SWP_NOZORDER, SWP_SHOWWINDOW,
-        SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
+        BringWindowToTop, IsIconic, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_TOP,
+        SWP_NOACTIVATE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE,
+        SW_SHOW,
     },
 };
 
@@ -19,11 +25,16 @@ pub fn apply_layout(
     force_resize: bool,
     restore_if_minimized: bool,
     pull_hidden_window: bool,
+    activate_after_show: bool,
 ) -> AppResult<()> {
-    if pull_hidden_window || (restore_if_minimized && unsafe { IsIconic(hwnd).as_bool() }) {
+    let should_show =
+        pull_hidden_window || (restore_if_minimized && unsafe { IsIconic(hwnd).as_bool() });
+    if should_show {
         unsafe {
             let _ = ShowWindow(hwnd, SW_RESTORE);
+            let _ = ShowWindow(hwnd, SW_SHOW);
         }
+        thread::sleep(Duration::from_millis(120));
     }
 
     let rect = absolute_rect(monitor, layout);
@@ -37,7 +48,10 @@ pub fn apply_layout(
     } else {
         0
     };
-    let mut flags = SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW;
+    let mut flags = SWP_SHOWWINDOW;
+    if !activate_after_show {
+        flags |= SWP_NOZORDER | SWP_NOACTIVATE;
+    }
     if !force_resize {
         flags |= windows::Win32::UI::WindowsAndMessaging::SWP_NOSIZE;
     }
@@ -64,7 +78,7 @@ pub fn apply_layout(
     unsafe {
         match state {
             WindowStatePreference::Normal => {
-                let _ = ShowWindow(hwnd, SW_SHOW);
+                let _ = ShowWindow(hwnd, SW_RESTORE);
             }
             WindowStatePreference::Maximized => {
                 let _ = ShowWindow(hwnd, SW_MAXIMIZE);
@@ -75,7 +89,35 @@ pub fn apply_layout(
         };
     }
 
+    if activate_after_show {
+        wake_painted_window(hwnd);
+    }
+
     Ok(())
+}
+
+fn wake_painted_window(hwnd: HWND) {
+    unsafe {
+        let _ = BringWindowToTop(hwnd);
+        let _ = SetForegroundWindow(hwnd);
+        let _ = RedrawWindow(
+            Some(hwnd),
+            None,
+            None,
+            RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN | RDW_FRAME,
+        );
+        let _ = UpdateWindow(hwnd);
+    }
+    thread::sleep(Duration::from_millis(120));
+    unsafe {
+        let _ = RedrawWindow(
+            Some(hwnd),
+            None,
+            None,
+            RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN | RDW_FRAME,
+        );
+        let _ = UpdateWindow(hwnd);
+    }
 }
 
 pub fn absolute_rect(monitor: &MonitorInfo, layout: &LayoutRect) -> RECT {
