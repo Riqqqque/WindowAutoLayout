@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.8
+
+- Fixed OBS tray restore taking the hidden window shortcut before OBS had a chance to show itself.
+- Made restore wait for a visible OBS window after waking the running process, then let OBS settle before applying the saved layout.
+
 ## 0.1.7
 
 - Fixed OBS coming back as a white window after restore from the tray by waking and repainting the pulled window before layout finishes.

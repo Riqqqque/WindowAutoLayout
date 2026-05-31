@@ -225,6 +225,53 @@ fn restore_app(
         AppPresence::RunningWithWindow
     };
     let mut launched = false;
+
+    if launch_missing && should_wake_matched_windows(app, &matched) {
+        let launch_path = running_process_launch_path(app, &running_processes);
+        match launcher::launch_app_with_path(app, launch_path.as_deref()) {
+            Ok(pid) => {
+                if log_events {
+                    let _ = logging::append(
+                        config_dir,
+                        LogSeverity::Info,
+                        Some(&profile.name),
+                        Some(&app.display_name),
+                        "Asked hidden running app to show its main window",
+                    );
+                }
+                let _ = wait_for_visible_windows(
+                    app,
+                    pid,
+                    app.detection_timeout_seconds,
+                    app.retry_interval_ms,
+                );
+                settle_visible_window(app);
+                matched = find_matching_windows(app, pid);
+                running_processes = matching_processes(app);
+                presence = if matched.is_empty() {
+                    if running_processes.is_empty() {
+                        AppPresence::NotRunning
+                    } else {
+                        AppPresence::RunningWithoutWindow
+                    }
+                } else {
+                    AppPresence::RunningWithWindow
+                };
+            }
+            Err(error) => {
+                if log_events {
+                    let _ = logging::append(
+                        config_dir,
+                        LogSeverity::Warn,
+                        Some(&profile.name),
+                        Some(&app.display_name),
+                        format!("Could not ask hidden running app to show itself: {error}"),
+                    );
+                }
+            }
+        }
+    }
+
     let should_launch_missing = matches!(presence, AppPresence::NotRunning);
     let should_wake_running =
         matches!(presence, AppPresence::RunningWithoutWindow) && app.wake_running_process;
@@ -291,12 +338,14 @@ fn restore_app(
             }
         };
 
-        matched = wait_for_windows(
+        let _ = wait_for_visible_windows(
             app,
             launched_pid,
             app.detection_timeout_seconds,
             app.retry_interval_ms,
         );
+        settle_visible_window(app);
+        matched = find_matching_windows(app, launched_pid);
         running_processes = matching_processes(app);
         presence = if matched.is_empty() {
             if running_processes.is_empty() {
@@ -433,7 +482,15 @@ pub fn find_matching_windows(app: &AppConfig, launched_pid: Option<u32>) -> Vec<
     matched
 }
 
-fn wait_for_windows(
+fn should_wake_matched_windows(app: &AppConfig, matched: &[WindowInfo]) -> bool {
+    app.wake_running_process
+        && !matched.is_empty()
+        && matched
+            .iter()
+            .all(|window| !window.is_visible || window.is_minimized)
+}
+
+fn wait_for_visible_windows(
     app: &AppConfig,
     launched_pid: Option<u32>,
     timeout_seconds: u64,
@@ -442,14 +499,39 @@ fn wait_for_windows(
     let timeout = Duration::from_secs(timeout_seconds.max(1));
     let interval = Duration::from_millis(retry_interval_ms.max(100));
     let deadline = Instant::now() + timeout;
+    let mut last_match = Vec::new();
 
     loop {
         let matched = find_matching_windows(app, launched_pid);
-        if !matched.is_empty() || Instant::now() >= deadline {
+        if matched
+            .iter()
+            .any(|window| window.is_visible && !window.is_minimized)
+        {
             return matched;
+        }
+        if !matched.is_empty() {
+            last_match = matched;
+        }
+        if Instant::now() >= deadline {
+            return last_match;
         }
         thread::sleep(interval);
     }
+}
+
+fn settle_visible_window(app: &AppConfig) {
+    let delay = if is_obs_app(app) {
+        app.retry_interval_ms.clamp(2500, 3500)
+    } else {
+        app.retry_interval_ms.clamp(250, 1200)
+    };
+    thread::sleep(Duration::from_millis(delay));
+}
+
+fn is_obs_app(app: &AppConfig) -> bool {
+    configured_process_name(app)
+        .map(|process_name| names_match("obs64.exe", &process_name))
+        .unwrap_or(false)
 }
 
 fn window_matches_app(window: &WindowInfo, app: &AppConfig, launched_pid: Option<u32>) -> bool {
@@ -776,6 +858,29 @@ mod tests {
         };
 
         assert!(window_matches_app(&window, &app, None));
+        assert!(should_wake_matched_windows(&app, &[window]));
+    }
+
+    #[test]
+    fn does_not_wake_when_a_matching_window_is_visible() {
+        let app = AppConfig::new_preset("obs", "OBS Studio", "obs64.exe", LayoutRect::default());
+        let window = WindowInfo {
+            handle: "0x1".into(),
+            title: "OBS Studio".into(),
+            class_name: "QtWindow".into(),
+            process_id: 10,
+            process_name: "obs64.exe".into(),
+            executable_path: None,
+            monitor_id: None,
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+            is_visible: true,
+            is_minimized: false,
+        };
+
+        assert!(!should_wake_matched_windows(&app, &[window]));
     }
 
     #[test]
