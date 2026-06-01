@@ -174,7 +174,7 @@ pub fn enforce_profile_for(
     duration_seconds: u64,
     interval_ms: u64,
 ) -> AppResult<RestoreResult> {
-    let interval = interval_ms.max(250);
+    let interval = interval_ms.clamp(1000, 5000);
     let until = Instant::now() + Duration::from_secs(duration_seconds.max(1));
     let mut last = restore_profile(config_dir, config, profile_id.clone(), Some(false))?;
 
@@ -519,6 +519,20 @@ fn restore_app(
         };
         let pull_hidden_window = app.pull_hidden_windows && !window.is_visible;
         let restore_minimized_window = app.restore_if_minimized && window.is_minimized;
+        let activate_window = pull_hidden_window
+            || restore_minimized_window
+            || activate_after_hidden_restore
+            || activate_visible_windows;
+        if window_layout_is_current(
+            window,
+            monitor,
+            app,
+            pull_hidden_window,
+            restore_minimized_window,
+            activate_window,
+        ) {
+            continue;
+        }
         if let Err(error) = window_actions::apply_layout(
             hwnd,
             monitor,
@@ -527,10 +541,7 @@ fn restore_app(
             app.force_resize,
             restore_minimized_window,
             pull_hidden_window,
-            pull_hidden_window
-                || restore_minimized_window
-                || activate_after_hidden_restore
-                || activate_visible_windows,
+            activate_window,
         ) {
             let message = error.to_string();
             let status = if message.to_ascii_lowercase().contains("access") {
@@ -578,6 +589,13 @@ fn restore_app(
     app_result(app, status, message, selected)
 }
 
+pub fn window_matches_profile_app(profile: &Profile, window: &WindowInfo) -> bool {
+    profile
+        .apps
+        .iter()
+        .any(|app| window_matches_app(window, app, None))
+}
+
 pub fn find_matching_windows(app: &AppConfig, launched_pid: Option<u32>) -> Vec<WindowInfo> {
     let mut matched =
         windows_enum::list_windows_with_hidden(app.pull_hidden_windows || launched_pid.is_some())
@@ -594,6 +612,34 @@ pub fn find_matching_windows(app: &AppConfig, launched_pid: Option<u32>) -> Vec<
             .then(left.title.cmp(&right.title))
     });
     matched
+}
+
+fn window_layout_is_current(
+    window: &WindowInfo,
+    monitor: &MonitorInfo,
+    app: &AppConfig,
+    pull_hidden_window: bool,
+    restore_minimized_window: bool,
+    activate_window: bool,
+) -> bool {
+    if pull_hidden_window
+        || restore_minimized_window
+        || activate_window
+        || app.window_state != crate::models::WindowStatePreference::Normal
+    {
+        return false;
+    }
+
+    let rect = window_actions::absolute_rect(monitor, &app.layout);
+    nearly_equal(window.x, rect.left)
+        && nearly_equal(window.y, rect.top)
+        && (!app.force_resize
+            || (nearly_equal(window.width, rect.right - rect.left)
+                && nearly_equal(window.height, rect.bottom - rect.top)))
+}
+
+fn nearly_equal(left: i32, right: i32) -> bool {
+    (left - right).abs() <= 3
 }
 
 fn should_show_matched_windows(app: &AppConfig, matched: &[WindowInfo]) -> bool {
@@ -1134,5 +1180,57 @@ mod tests {
         };
 
         assert!(window_matches_app(&window, &app, None));
+    }
+
+    #[test]
+    fn current_windows_skip_repeated_layout_work() {
+        let monitor = MonitorInfo {
+            id: "display".into(),
+            name: "Display".into(),
+            device_name: "DISPLAY1".into(),
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+            work_x: 0,
+            work_y: 0,
+            work_width: 1920,
+            work_height: 1040,
+            scale_factor: 1.0,
+            is_primary: true,
+        };
+        let app = AppConfig::new_preset(
+            "discord",
+            "Discord",
+            "Discord.exe",
+            LayoutRect {
+                x: 1280,
+                y: 0,
+                width: 640,
+                height: 720,
+            },
+        );
+        let window = WindowInfo {
+            handle: "0x1".into(),
+            title: "Discord".into(),
+            class_name: "Chrome_WidgetWin_1".into(),
+            process_id: 10,
+            process_name: "Discord.exe".into(),
+            executable_path: None,
+            monitor_id: Some("display".into()),
+            x: 1281,
+            y: 1,
+            width: 640,
+            height: 719,
+            is_visible: true,
+            is_minimized: false,
+        };
+
+        assert!(window_layout_is_current(
+            &window, &monitor, &app, false, false, false
+        ));
+        assert!(!window_layout_is_current(
+            &window, &monitor, &app, false, false, true
+        ));
     }
 }

@@ -18,7 +18,7 @@ Update these together for every release:
 The tag must match the package version:
 
 ```text
-package.json version 0.1.13 -> tag v0.1.13
+package.json version 0.1.14 -> tag v0.1.14
 ```
 
 ## Local Finish Pass
@@ -69,8 +69,8 @@ Commit the release changes, then push main and the version tag:
 
 ```powershell
 git push origin main
-git tag v0.1.13
-git push origin v0.1.13
+git tag v0.1.14
+git push origin v0.1.14
 ```
 
 The GitHub workflow:
@@ -97,7 +97,7 @@ WindowAutoLayout_<version>_x64_en-US.msi.sha256
 Verify the published release:
 
 ```powershell
-gh release view v0.1.13 --repo Riqqqque/WindowAutoLayout --json url,tagName,name,isDraft,isPrerelease,assets
+gh release view v0.1.14 --repo Riqqqque/WindowAutoLayout --json url,tagName,name,isDraft,isPrerelease,assets
 ```
 
 ## Troubleshooting Release Builds

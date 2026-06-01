@@ -6,9 +6,10 @@ use crate::{
     config,
     errors::{AppError, AppResult},
     logging,
-    models::LogSeverity,
-    profiles,
+    models::{LogSeverity, MonitorInfo, WindowAutoLayoutConfig, WindowInfo},
+    monitors, profiles,
     state::AppState,
+    windows_enum,
 };
 
 pub fn enabled(app: &AppHandle) -> AppResult<bool> {
@@ -72,6 +73,7 @@ pub fn toggle(app: &AppHandle, profile_id: Option<String>) -> AppResult<bool> {
 }
 
 fn spawn(app: AppHandle, generation: u64) {
+    let mut allow_launch_missing = true;
     thread::spawn(move || loop {
         let (config_dir, config, profile_id, interval_ms) = {
             let state = app.state::<AppState>();
@@ -87,7 +89,7 @@ fn spawn(app: AppHandle, generation: u64) {
                 Ok(config) => config.clone(),
                 Err(_) => break,
             };
-            let interval_ms = config.enforcement.interval_ms.clamp(150, 250);
+            let interval_ms = config.enforcement.interval_ms.clamp(1000, 5000);
             (
                 state.config_dir.clone(),
                 config,
@@ -96,7 +98,97 @@ fn spawn(app: AppHandle, generation: u64) {
             )
         };
 
-        let _ = profiles::restore_profile_silent(&config_dir, &config, profile_id, Some(true));
+        if !should_pause_for_fullscreen(&config, profile_id.as_deref()) {
+            let _ = profiles::restore_profile_silent(
+                &config_dir,
+                &config,
+                profile_id.clone(),
+                Some(allow_launch_missing),
+            );
+            allow_launch_missing = false;
+        }
         thread::sleep(Duration::from_millis(interval_ms));
     });
+}
+
+fn should_pause_for_fullscreen(config: &WindowAutoLayoutConfig, profile_id: Option<&str>) -> bool {
+    if !config.enforcement.pause_for_fullscreen_games {
+        return false;
+    }
+
+    let Some(window) = windows_enum::foreground_window() else {
+        return false;
+    };
+    if !is_fullscreen_window(&window) {
+        return false;
+    }
+
+    profiles::resolve_profile(config, profile_id)
+        .map(|profile| !profiles::window_matches_profile_app(profile, &window))
+        .unwrap_or(true)
+}
+
+fn is_fullscreen_window(window: &WindowInfo) -> bool {
+    if !window.is_visible || window.is_minimized {
+        return false;
+    }
+
+    monitors::list_monitors()
+        .unwrap_or_default()
+        .iter()
+        .any(|monitor| covers_monitor(window, monitor))
+}
+
+fn covers_monitor(window: &WindowInfo, monitor: &MonitorInfo) -> bool {
+    let tolerance = 4;
+    (window.x - monitor.x).abs() <= tolerance
+        && (window.y - monitor.y).abs() <= tolerance
+        && window.width >= monitor.width - tolerance
+        && window.height >= monitor.height - tolerance
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_monitor_covering_windows() {
+        let monitor = MonitorInfo {
+            id: "display".into(),
+            name: "Display".into(),
+            device_name: "DISPLAY1".into(),
+            x: 0,
+            y: 0,
+            width: 2560,
+            height: 1440,
+            work_x: 0,
+            work_y: 0,
+            work_width: 2560,
+            work_height: 1392,
+            scale_factor: 1.25,
+            is_primary: true,
+        };
+        let fullscreen = WindowInfo {
+            handle: "0x1".into(),
+            title: "Game".into(),
+            class_name: "GameWindow".into(),
+            process_id: 10,
+            process_name: "game.exe".into(),
+            executable_path: None,
+            monitor_id: Some("display".into()),
+            x: 0,
+            y: 0,
+            width: 2560,
+            height: 1440,
+            is_visible: true,
+            is_minimized: false,
+        };
+        let maximized = WindowInfo {
+            height: 1392,
+            ..fullscreen.clone()
+        };
+
+        assert!(covers_monitor(&fullscreen, &monitor));
+        assert!(!covers_monitor(&maximized, &monitor));
+    }
 }

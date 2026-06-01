@@ -13,7 +13,7 @@ export const isTauriRuntime = typeof window !== "undefined" && "__TAURI_INTERNAL
 
 const browserConfig: WindowAutoLayoutConfig = {
   schemaVersion: 2,
-  appVersion: "0.1.13",
+  appVersion: "0.1.14",
   global: {
     defaultMonitorId: "display-2",
     monitorMissingBehavior: "doNothing",
@@ -31,7 +31,7 @@ const browserConfig: WindowAutoLayoutConfig = {
   },
   tray: { minimizeToTrayOnClose: true, showRestoreStatus: true },
   hotkey: { enabled: true, accelerator: "Ctrl+Alt+L", restoreWithoutOpening: true },
-  enforcement: { enabled: false, profileId: "profile-streaming", durationSeconds: 30, intervalMs: 250 },
+  enforcement: { enabled: false, profileId: "profile-streaming", durationSeconds: 30, intervalMs: 1000, pauseForFullscreenGames: true },
   profiles: [
     {
       id: "profile-streaming",

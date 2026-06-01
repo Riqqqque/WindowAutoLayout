@@ -215,6 +215,8 @@ pub struct EnforcementSettings {
     pub profile_id: Option<String>,
     pub duration_seconds: u64,
     pub interval_ms: u64,
+    #[serde(default = "default_true")]
+    pub pause_for_fullscreen_games: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -428,7 +430,8 @@ impl Default for WindowAutoLayoutConfig {
                 enabled: false,
                 profile_id: Some(default_profile_id.clone()),
                 duration_seconds: 30,
-                interval_ms: 250,
+                interval_ms: 1000,
+                pause_for_fullscreen_games: true,
             },
             profiles: vec![Profile {
                 id: default_profile_id,

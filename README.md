@@ -164,9 +164,9 @@ scripts/              Local install/update helper
 Every version tag matching `v*` builds the Windows bundles and publishes installer assets to GitHub Releases.
 
 ```powershell
-git tag v0.1.13
+git tag v0.1.14
 git push origin main
-git push origin v0.1.13
+git push origin v0.1.14
 ```
 
 The workflow validates that the tag matches `package.json`, runs TypeScript and Rust checks, builds the Tauri bundle, generates checksums, uploads CI artifacts, and publishes the release.

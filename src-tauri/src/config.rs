@@ -100,7 +100,7 @@ fn normalize_config(config: &mut WindowAutoLayoutConfig) -> bool {
         }
     }
 
-    let interval_ms = config.enforcement.interval_ms.clamp(150, 250);
+    let interval_ms = config.enforcement.interval_ms.clamp(1000, 5000);
     if config.enforcement.interval_ms != interval_ms {
         config.enforcement.interval_ms = interval_ms;
         changed = true;
@@ -158,6 +158,8 @@ mod tests {
         let parsed: WindowAutoLayoutConfig = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(parsed.schema_version, CONFIG_SCHEMA_VERSION);
         assert_eq!(parsed.profiles[0].name, "Streaming");
+        assert_eq!(parsed.enforcement.interval_ms, 1000);
+        assert!(parsed.enforcement.pause_for_fullscreen_games);
     }
 
     #[test]
@@ -166,5 +168,14 @@ mod tests {
         config.profiles[0].apps[0].layout.width = 20;
         let issues = validate_config(&config);
         assert!(issues.iter().any(|issue| issue.contains("very small")));
+    }
+
+    #[test]
+    fn normalizes_lock_interval_for_low_impact_polling() {
+        let mut config = WindowAutoLayoutConfig::default();
+        config.enforcement.interval_ms = 150;
+
+        assert!(normalize_config(&mut config));
+        assert_eq!(config.enforcement.interval_ms, 1000);
     }
 }

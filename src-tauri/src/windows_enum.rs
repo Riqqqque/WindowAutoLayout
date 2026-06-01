@@ -6,8 +6,8 @@ use windows::{
         Foundation::{HWND, LPARAM, RECT},
         Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS},
         UI::WindowsAndMessaging::{
-            EnumWindows, GetClassNameW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
-            GetWindowThreadProcessId, IsIconic, IsWindowVisible,
+            EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowRect, GetWindowTextLengthW,
+            GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
         },
     },
 };
@@ -37,6 +37,11 @@ pub fn list_windows_with_hidden(include_hidden: bool) -> AppResult<Vec<WindowInf
     } else {
         Err(AppError::Windows("EnumWindows failed".to_string()))
     }
+}
+
+pub fn foreground_window() -> Option<WindowInfo> {
+    let hwnd = unsafe { GetForegroundWindow() };
+    window_info_from_handle(hwnd)
 }
 
 struct EnumWindowsContext<'a> {

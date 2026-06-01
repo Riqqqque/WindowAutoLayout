@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.14
+
+- Made layout lock lighter for gaming by using a calmer default interval and pausing while a fullscreen foreground app is active.
+- Stopped repeated lock passes from moving windows that are already in their saved position.
+
 ## 0.1.13
 
 - Added delete buttons for profile restore items on Dashboard and Layout.

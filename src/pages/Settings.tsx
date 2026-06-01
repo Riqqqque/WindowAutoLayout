@@ -96,9 +96,9 @@ export function SettingsPage({ config, monitors, configPath, logPath, onConfigCh
           </Field>
           <Field label="Lock interval ms">
             <NumberInput
-              min={150}
-              max={250}
-              step={50}
+              min={1000}
+              max={5000}
+              step={500}
               value={config.enforcement.intervalMs}
               onChange={(event) =>
                 onConfigChange({ ...config, enforcement: { ...config.enforcement, intervalMs: Number(event.target.value) } })
@@ -113,6 +113,7 @@ export function SettingsPage({ config, monitors, configPath, logPath, onConfigCh
           <Toggle label="Restore on launch" checked={config.startup.restoreOnLaunch} onChange={(checked) => onConfigChange({ ...config, startup: { ...config.startup, restoreOnLaunch: checked } })} />
           <Toggle label="Minimize close button to tray" checked={config.tray.minimizeToTrayOnClose} onChange={(checked) => onConfigChange({ ...config, tray: { ...config.tray, minimizeToTrayOnClose: checked } })} />
           <Toggle label="Enable hotkey" checked={config.hotkey.enabled} onChange={(checked) => onConfigChange({ ...config, hotkey: { ...config.hotkey, enabled: checked } })} />
+          <Toggle label="Pause lock during fullscreen apps" checked={config.enforcement.pauseForFullscreenGames} onChange={(checked) => onConfigChange({ ...config, enforcement: { ...config.enforcement, pauseForFullscreenGames: checked } })} />
           <Toggle label="Warn when monitor is missing" checked={config.global.warnWhenMonitorMissing} onChange={(checked) => onConfigChange({ ...config, global: { ...config.global, warnWhenMonitorMissing: checked } })} />
           <Toggle label="Advanced mode" checked={config.global.advancedMode} onChange={(checked) => onConfigChange({ ...config, global: { ...config.global, advancedMode: checked } })} />
         </div>

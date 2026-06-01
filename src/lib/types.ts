@@ -102,6 +102,7 @@ export interface EnforcementSettings {
   profileId?: string | null;
   durationSeconds: number;
   intervalMs: number;
+  pauseForFullscreenGames: boolean;
 }
 
 export interface WindowAutoLayoutConfig {
