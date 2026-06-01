@@ -1,4 +1,4 @@
-import { AlignHorizontalSpaceAround, Columns2, Maximize2, Rows2 } from "lucide-react";
+import { AlignHorizontalSpaceAround, Columns2, Maximize2, Rows2, Trash2 } from "lucide-react";
 import { Field, NumberInput, Toggle } from "../components/Form";
 import { IconButton } from "../components/IconButton";
 import { MonitorPreview } from "../components/MonitorPreview";
@@ -20,6 +20,7 @@ interface LayoutEditorProps {
   onRefreshWindows: () => void;
   onSaveSelectedWindow: () => void;
   onShowGridChange: (value: boolean) => void;
+  onRemoveApp: (appId: string) => void;
 }
 
 export function LayoutEditorPage({
@@ -36,6 +37,7 @@ export function LayoutEditorPage({
   onRefreshWindows,
   onSaveSelectedWindow,
   onShowGridChange,
+  onRemoveApp,
 }: LayoutEditorProps) {
   const app = profile.apps.find((item) => item.id === selectedAppId) ?? profile.apps[0];
   const monitor =
@@ -103,7 +105,14 @@ export function LayoutEditorPage({
         <section className="surface rounded-md p-4">
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold uppercase tracking-normal text-[#8a94a3]">Selected app</h2>
-            <Toggle label="Grid" checked={showGrid} onChange={onShowGridChange} />
+            <div className="flex items-center gap-2">
+              {app && (
+                <IconButton label={`Remove ${app.displayName} from profile`} onClick={() => onRemoveApp(app.id)} variant="danger">
+                  <Trash2 size={15} />
+                </IconButton>
+              )}
+              <Toggle label="Grid" checked={showGrid} onChange={onShowGridChange} />
+            </div>
           </div>
           {app ? (
             <div className="mt-4 grid grid-cols-2 gap-3">

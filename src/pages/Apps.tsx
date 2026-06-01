@@ -12,6 +12,7 @@ interface AppsProps {
   selectedAppId?: string | null;
   onSelectedAppChange: (appId: string) => void;
   onConfigChange: (config: WindowAutoLayoutConfig) => void;
+  onRemoveApp: (appId: string) => void;
 }
 
 const titleModes: TitleMatchMode[] = ["contains", "exact", "startsWith", "endsWith", "regex"];
@@ -25,6 +26,7 @@ export function AppsPage({
   selectedAppId,
   onSelectedAppChange,
   onConfigChange,
+  onRemoveApp,
 }: AppsProps) {
   const app = profile.apps.find((item) => item.id === selectedAppId) ?? profile.apps[0];
 
@@ -72,12 +74,6 @@ export function AppsPage({
     onSelectedAppChange(id);
   }
 
-  function removeApp(appId: string) {
-    const remaining = profile.apps.filter((item) => item.id !== appId);
-    onConfigChange(patchProfile(config, profile.id, (profile) => ({ ...profile, apps: remaining })));
-    if (remaining[0]) onSelectedAppChange(remaining[0].id);
-  }
-
   return (
     <div className="grid gap-4 xl:grid-cols-[320px_1fr]">
       <section className="surface rounded-md p-3">
@@ -99,18 +95,22 @@ export function AppsPage({
         </Field>
         <div className="mt-3 grid gap-2">
           {profile.apps.map((item) => (
-            <button
+            <div
               key={item.id}
-              className={`rounded-md border px-3 py-2 text-left transition ${
+              className={`flex items-center gap-2 rounded-md border py-2 pl-3 pr-2 transition ${
                 item.id === app?.id
                   ? "border-[#5db7ff]/45 bg-[#5db7ff]/10 text-[#d7edff]"
                   : "border-[#252b34] bg-[#0d1117] text-zinc-300 hover:border-[#34404d] hover:bg-[#121820]"
               }`}
-              onClick={() => onSelectedAppChange(item.id)}
             >
-              <span className="block truncate text-sm font-medium">{item.displayName}</span>
-              <span className="mt-1 block truncate text-xs text-[#8a94a3]">{item.processName ?? "Process unset"}</span>
-            </button>
+              <button className="min-w-0 flex-1 text-left" onClick={() => onSelectedAppChange(item.id)}>
+                <span className="block truncate text-sm font-medium">{item.displayName}</span>
+                <span className="mt-1 block truncate text-xs text-[#8a94a3]">{item.processName ?? "Process unset"}</span>
+              </button>
+              <IconButton label={`Remove ${item.displayName} from profile`} onClick={() => onRemoveApp(item.id)} variant="danger">
+                <Trash2 size={15} />
+              </IconButton>
+            </div>
           ))}
         </div>
       </section>
@@ -119,7 +119,7 @@ export function AppsPage({
         <section className="surface rounded-md p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-lg font-semibold text-zinc-50">{app.displayName}</h2>
-            <IconButton label="Remove app" onClick={() => removeApp(app.id)} variant="danger">
+            <IconButton label={`Remove ${app.displayName} from profile`} onClick={() => onRemoveApp(app.id)} variant="danger">
               <Trash2 size={16} />
             </IconButton>
           </div>

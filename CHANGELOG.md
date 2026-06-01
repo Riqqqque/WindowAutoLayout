@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.13
+
+- Added delete buttons for profile restore items on Dashboard and Layout.
+- Kept app removal consistent across the profile editor so selection moves cleanly to the next app.
+
 ## 0.1.12
 
 - Added a capture current layout workflow that snapshots visible windows on a selected monitor into the active profile.

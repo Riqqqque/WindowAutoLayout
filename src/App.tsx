@@ -13,7 +13,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { register, unregisterAll } from "@tauri-apps/plugin-global-shortcut";
 import { clsx } from "clsx";
 import { api, isTauriRuntime } from "./lib/api";
-import { activeProfile } from "./lib/helpers";
+import { activeProfile, patchProfile } from "./lib/helpers";
 import type {
   AppConfig,
   LogEntry,
@@ -143,6 +143,21 @@ export default function App() {
   function updateConfig(next: WindowAutoLayoutConfig) {
     setConfig(next);
     setDirty(true);
+  }
+
+  function removeAppFromProfile(appId: string) {
+    if (!config || !profile) return;
+    const removed = profile.apps.find((item) => item.id === appId);
+    const remaining = profile.apps.filter((item) => item.id !== appId);
+    updateConfig(patchProfile(config, profile.id, (profile) => ({ ...profile, apps: profile.apps.filter((item) => item.id !== appId) })));
+
+    if (!remaining.some((item) => item.id === selectedAppId)) {
+      setSelectedAppId(remaining[0]?.id ?? null);
+    }
+    if (selectedWindowHandle) {
+      setSelectedWindowHandle(null);
+    }
+    setMessage(removed ? `Removed ${removed.displayName}` : "Removed app");
   }
 
   async function saveConfig() {
@@ -346,6 +361,7 @@ export default function App() {
                 onRefresh={() => refresh().catch((error) => setMessage(String(error)))}
                 onCaptureMonitorChange={setCaptureMonitorId}
                 onCaptureCurrentLayout={captureCurrentLayout}
+                onRemoveApp={removeAppFromProfile}
               />
             )}
             {page === "profiles" && (
@@ -375,6 +391,7 @@ export default function App() {
                 onRefreshWindows={() => refreshWindowsAndLogs().catch((error) => setMessage(String(error)))}
                 onSaveSelectedWindow={saveSelectedWindow}
                 onShowGridChange={setShowGrid}
+                onRemoveApp={removeAppFromProfile}
               />
             )}
             {page === "apps" && (
@@ -386,6 +403,7 @@ export default function App() {
                 selectedAppId={selectedAppId}
                 onSelectedAppChange={setSelectedAppId}
                 onConfigChange={updateConfig}
+                onRemoveApp={removeAppFromProfile}
               />
             )}
             {page === "logs" && (

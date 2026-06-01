@@ -1,4 +1,4 @@
-import { AlertTriangle, Camera, CheckCircle2, LockKeyhole, Monitor, Play, RefreshCw, UnlockKeyhole } from "lucide-react";
+import { AlertTriangle, Camera, CheckCircle2, LockKeyhole, Monitor, Play, RefreshCw, Trash2, UnlockKeyhole } from "lucide-react";
 import type { AppConfig, MonitorInfo, Profile, RestoreResult, WindowAutoLayoutConfig, WindowInfo } from "../lib/types";
 import { monitorLabel } from "../lib/helpers";
 import { StatusBadge } from "../components/StatusBadge";
@@ -21,6 +21,7 @@ interface DashboardProps {
   onRefresh: () => void;
   onCaptureMonitorChange: (monitorId: string) => void;
   onCaptureCurrentLayout: () => void;
+  onRemoveApp: (appId: string) => void;
 }
 
 export function Dashboard({
@@ -39,6 +40,7 @@ export function Dashboard({
   onRefresh,
   onCaptureMonitorChange,
   onCaptureCurrentLayout,
+  onRemoveApp,
 }: DashboardProps) {
   const monitor = monitors.find((item) => item.id === (profile.targetMonitorId ?? config.global.defaultMonitorId));
   const visibleWindows = windows.filter((window) => window.isVisible && !window.isMinimized).length;
@@ -148,7 +150,7 @@ export function Dashboard({
           </div>
           <div className="mt-4 grid gap-2">
             {profile.apps.map((app) => (
-              <AppRow key={app.id} app={app} windows={windows} lastRestore={lastRestore} />
+              <AppRow key={app.id} app={app} windows={windows} lastRestore={lastRestore} onRemove={() => onRemoveApp(app.id)} />
             ))}
             {profile.apps.length === 0 && (
               <div className="surface-soft rounded-md px-3 py-8 text-center text-sm text-[#8a94a3]">No apps are configured in this profile.</div>
@@ -200,13 +202,23 @@ export function Dashboard({
   );
 }
 
-function AppRow({ app, windows, lastRestore }: { app: AppConfig; windows: WindowInfo[]; lastRestore?: RestoreResult | null }) {
+function AppRow({
+  app,
+  windows,
+  lastRestore,
+  onRemove,
+}: {
+  app: AppConfig;
+  windows: WindowInfo[];
+  lastRestore?: RestoreResult | null;
+  onRemove: () => void;
+}) {
   const processName = app.processName?.toLowerCase();
   const matches = processName ? windows.filter((window) => window.processName.toLowerCase() === processName).length : 0;
   const restoreStatus = lastRestore?.results.find((result) => result.appId === app.id)?.status;
 
   return (
-    <div className="grid gap-3 rounded-md border border-[#252b34] bg-[#0d1117] px-3 py-3 md:grid-cols-[1fr_120px_120px]">
+    <div className="grid gap-3 rounded-md border border-[#252b34] bg-[#0d1117] px-3 py-3 md:grid-cols-[minmax(0,1fr)_120px_132px_44px]">
       <div className="min-w-0">
         <div className="truncate text-sm font-semibold text-zinc-100">{app.displayName}</div>
         <div className="mt-1 truncate text-xs text-[#8a94a3]">{app.processName ?? "Process unset"}</div>
@@ -221,6 +233,9 @@ function AppRow({ app, windows, lastRestore }: { app: AppConfig; windows: Window
         {restoreStatus ? <StatusBadge value={restoreStatus} /> : <StatusBadge value={matches > 0 ? "success" : "skipped"} />}
         <span className="text-xs text-[#8a94a3]">{matches} live</span>
       </div>
+      <IconButton label={`Remove ${app.displayName} from profile`} onClick={onRemove} variant="danger" className="justify-self-start md:justify-self-end">
+        <Trash2 size={15} />
+      </IconButton>
     </div>
   );
 }
