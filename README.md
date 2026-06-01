@@ -113,6 +113,7 @@ Useful notes:
 - [Manual Test Notes](docs/manual-test.md)
 - [Release Notes](docs/release.md)
 - [Example Config](examples/windowautolayout.example.json)
+- [GitHub Wiki](https://github.com/Riqqqque/WindowAutoLayout/wiki)
 
 ## Build From Source
 
