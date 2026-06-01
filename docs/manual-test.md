@@ -21,8 +21,11 @@ Use these checks for release smoke testing on Windows 11. For restore behavior, 
 ## Capture And Restore
 
 - Open OBS and Discord.
-- Add or edit app entries so process names match `obs64.exe` and `Discord.exe`.
-- Select each real window in Layout and save it.
+- Arrange the windows on one monitor.
+- On Dashboard, pick that monitor and press Capture current layout.
+- Confirm the profile app list now matches the visible windows on that monitor.
+- Confirm the profile target monitor changed to the captured monitor.
+- Select each real window in Layout and save it when testing per-window capture.
 - Move both windows away from their saved positions.
 - Restore the profile from Dashboard.
 - Minimize one window and restore again.

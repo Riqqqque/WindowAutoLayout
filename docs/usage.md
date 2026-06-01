@@ -19,10 +19,10 @@ WindowAutoLayout is built around one idea: save a workspace once, then bring it 
 2. Open WindowAutoLayout.
 3. Go to Settings and choose the default monitor if the profile should use one monitor by default.
 4. Go to Profiles and pick the profile you want to edit.
-5. Go to Apps and confirm each app entry matches the real process name.
-6. Arrange the apps exactly how you want them.
-7. Go to Layout and save each real window into the matching app entry.
-8. Go to Dashboard and press Restore.
+5. Arrange the apps exactly how you want them.
+6. Go to Dashboard, pick the monitor to capture, and press Capture current layout.
+7. Fine-tune any app entry in Apps or any single window in Layout if needed.
+8. Press Restore.
 
 Once that works, enable startup restore or use the tray menu and hotkey.
 
@@ -63,13 +63,13 @@ For most apps, process name plus saved layout is enough.
 
 Use Layout when you want full control over which real window belongs to an app entry.
 
-Use Dashboard capture when every configured app is already open and easy to match.
+Use Dashboard capture when the visible windows on one monitor should become the current profile. Capture sets the profile target monitor, replaces that profile's app list with the visible windows on the selected monitor, and saves their monitor-relative positions.
 
 Good save flow:
 
 1. Put the target apps where you want them.
 2. Confirm the monitor is correct.
-3. Save each app from Layout.
+3. Capture from Dashboard or save each app from Layout.
 4. Move the windows somewhere else.
 5. Restore the profile.
 6. Check Logs if anything does not move.

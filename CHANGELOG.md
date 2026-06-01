@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.12
+
+- Added a capture current layout workflow that snapshots visible windows on a selected monitor into the active profile.
+- Made capture set the profile target monitor and save window positions as monitor-relative layouts.
+- Kept captured profiles ready to restore by saving process names, executable paths, class names, and safer title rules when needed.
+
 ## 0.1.11
 
 - Refreshed the app shell with a cleaner dashboard, sidebar, controls, status panels, and layout editor.

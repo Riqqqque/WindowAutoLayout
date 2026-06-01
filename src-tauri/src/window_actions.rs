@@ -21,6 +21,7 @@ use crate::{
     models::{LayoutRect, MonitorInfo, WindowStatePreference},
 };
 
+#[allow(clippy::too_many_arguments)]
 pub fn apply_layout(
     hwnd: HWND,
     monitor: &MonitorInfo,

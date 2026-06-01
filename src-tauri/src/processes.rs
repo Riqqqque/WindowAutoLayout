@@ -31,8 +31,10 @@ pub fn list_processes() -> AppResult<Vec<ProcessInfo>> {
             .map_err(|err| AppError::Windows(err.message().to_string()))?
     };
 
-    let mut entry = PROCESSENTRY32W::default();
-    entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+    let mut entry = PROCESSENTRY32W {
+        dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+        ..Default::default()
+    };
 
     let mut processes = Vec::new();
     let mut has_entry = unsafe { Process32FirstW(snapshot, &mut entry).is_ok() };

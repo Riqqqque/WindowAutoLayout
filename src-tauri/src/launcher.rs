@@ -226,9 +226,7 @@ fn installed_name_matches(display_name: &str, app: &AppConfig, process_name: &st
     let app_name = normalize_name(&app.display_name);
     let process_stem = normalize_name(file_stem(process_name).as_deref().unwrap_or(process_name));
 
-    display_name == app_name
-        || (!process_stem.is_empty() && display_name.contains(&process_stem))
-        || (!app_name.is_empty() && app_name.len() >= 5 && display_name == app_name)
+    display_name == app_name || (!process_stem.is_empty() && display_name.contains(&process_stem))
 }
 
 fn known_install_candidates(app: &AppConfig, process_name: &str) -> Vec<LaunchTarget> {

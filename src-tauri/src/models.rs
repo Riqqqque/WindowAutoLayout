@@ -288,6 +288,26 @@ pub struct RestoreResult {
     pub results: Vec<AppRestoreResult>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CapturedWindowSummary {
+    pub app_id: String,
+    pub display_name: String,
+    pub process_name: String,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureLayoutResult {
+    pub config: WindowAutoLayoutConfig,
+    pub profile_id: String,
+    pub monitor: MonitorInfo,
+    pub captured_count: usize,
+    pub skipped_count: usize,
+    pub captured_windows: Vec<CapturedWindowSummary>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LogEntry {

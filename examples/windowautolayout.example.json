@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "appVersion": "0.1.11",
+  "appVersion": "0.1.12",
   "global": {
     "defaultMonitorId": null,
     "monitorMissingBehavior": "doNothing",

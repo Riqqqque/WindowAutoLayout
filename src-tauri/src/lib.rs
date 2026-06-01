@@ -67,6 +67,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::clear_logs,
             commands::config_path,
+            commands::capture_current_layout,
             commands::get_app_presets,
             commands::get_config,
             commands::list_monitors,

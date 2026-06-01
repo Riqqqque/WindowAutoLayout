@@ -59,8 +59,14 @@ export default function App() {
   const [showGrid, setShowGrid] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const [layoutLocked, setLayoutLocked] = useState(false);
+  const [captureMonitorId, setCaptureMonitorId] = useState<string | null>(null);
 
   const profile = useMemo(() => (config ? activeProfile(config, selectedProfileId) : null), [config, selectedProfileId]);
+  const effectiveCaptureMonitorId = useMemo(() => {
+    if (!config || !profile) return "";
+    const preferred = captureMonitorId ?? profile.targetMonitorId ?? config.global.defaultMonitorId ?? monitors[0]?.id ?? "";
+    return monitors.some((monitor) => monitor.id === preferred) ? preferred : (monitors[0]?.id ?? "");
+  }, [captureMonitorId, config, monitors, profile]);
 
   const refresh = useCallback(async () => {
     const [nextConfig, nextMonitors, nextWindows, nextLogs, nextPresets, nextConfigPath, nextLogPath, nextValidation, nextLayoutLocked] =
@@ -86,6 +92,7 @@ export default function App() {
     setLayoutLocked(nextLayoutLocked);
     setSelectedProfileId((current) => current ?? nextConfig.startup.defaultProfileId ?? nextConfig.profiles[0]?.id ?? null);
     setSelectedAppId((current) => current ?? nextConfig.profiles[0]?.apps[0]?.id ?? null);
+    setCaptureMonitorId((current) => current ?? nextConfig.profiles[0]?.targetMonitorId ?? nextConfig.global.defaultMonitorId ?? nextMonitors[0]?.id ?? null);
     setDirty(false);
   }, []);
 
@@ -173,14 +180,24 @@ export default function App() {
     }
   }
 
-  async function saveAllLayouts() {
-    if (!profile) return;
+  async function captureCurrentLayout() {
+    if (!config || !profile) return;
+    if (!effectiveCaptureMonitorId) {
+      setMessage("Pick a monitor before capturing");
+      return;
+    }
     setBusy(true);
     try {
-      const nextConfig = await api.saveAllCurrentLayouts(profile.id);
-      setConfig(nextConfig);
+      const saved = dirty ? await api.saveConfig(config) : config;
+      setConfig(saved);
       setDirty(false);
-      setMessage("Captured matching windows");
+      const result = await api.captureCurrentLayout(profile.id, effectiveCaptureMonitorId);
+      const capturedProfile = result.config.profiles.find((item) => item.id === profile.id);
+      setConfig(result.config);
+      setSelectedProfileId(profile.id);
+      setSelectedAppId(capturedProfile?.apps[0]?.id ?? null);
+      setCaptureMonitorId(result.monitor.id);
+      setMessage(`Captured ${result.capturedCount} window${result.capturedCount === 1 ? "" : "s"} on ${result.monitor.name}`);
       await refreshWindowsAndLogs();
     } catch (error) {
       setMessage(String(error));
@@ -316,15 +333,19 @@ export default function App() {
                 lastRestore={lastRestore}
                 validation={validation}
                 busy={busy}
+                captureMonitorId={effectiveCaptureMonitorId}
                 onProfileChange={(id) => {
                   setSelectedProfileId(id);
-                  setSelectedAppId(config.profiles.find((item) => item.id === id)?.apps[0]?.id ?? null);
+                  const nextProfile = config.profiles.find((item) => item.id === id);
+                  setSelectedAppId(nextProfile?.apps[0]?.id ?? null);
+                  setCaptureMonitorId(nextProfile?.targetMonitorId ?? config.global.defaultMonitorId ?? monitors[0]?.id ?? null);
                 }}
                 onRestore={restoreSelected}
                 onLockToggle={toggleLayoutLock}
                 layoutLocked={layoutLocked}
                 onRefresh={() => refresh().catch((error) => setMessage(String(error)))}
-                onSaveAll={saveAllLayouts}
+                onCaptureMonitorChange={setCaptureMonitorId}
+                onCaptureCurrentLayout={captureCurrentLayout}
               />
             )}
             {page === "profiles" && (

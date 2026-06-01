@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, LockKeyhole, Monitor, Play, RefreshCw, Save, UnlockKeyhole } from "lucide-react";
+import { AlertTriangle, Camera, CheckCircle2, LockKeyhole, Monitor, Play, RefreshCw, UnlockKeyhole } from "lucide-react";
 import type { AppConfig, MonitorInfo, Profile, RestoreResult, WindowAutoLayoutConfig, WindowInfo } from "../lib/types";
 import { monitorLabel } from "../lib/helpers";
 import { StatusBadge } from "../components/StatusBadge";
@@ -14,11 +14,13 @@ interface DashboardProps {
   validation: string[];
   busy: boolean;
   layoutLocked: boolean;
+  captureMonitorId: string;
   onProfileChange: (profileId: string) => void;
   onRestore: () => void;
   onLockToggle: () => void;
   onRefresh: () => void;
-  onSaveAll: () => void;
+  onCaptureMonitorChange: (monitorId: string) => void;
+  onCaptureCurrentLayout: () => void;
 }
 
 export function Dashboard({
@@ -30,11 +32,13 @@ export function Dashboard({
   validation,
   busy,
   layoutLocked,
+  captureMonitorId,
   onProfileChange,
   onRestore,
   onLockToggle,
   onRefresh,
-  onSaveAll,
+  onCaptureMonitorChange,
+  onCaptureCurrentLayout,
 }: DashboardProps) {
   const monitor = monitors.find((item) => item.id === (profile.targetMonitorId ?? config.global.defaultMonitorId));
   const visibleWindows = windows.filter((window) => window.isVisible && !window.isMinimized).length;
@@ -115,14 +119,32 @@ export function Dashboard({
               <h2 className="text-lg font-semibold text-zinc-50">Apps in profile</h2>
               <p className="mt-1 text-sm text-[#8a94a3]">What restore will target right now.</p>
             </div>
-            <button
-              className="inline-flex h-9 items-center gap-2 rounded-md border border-[#2a323d] bg-[#111820] px-3 text-sm text-zinc-200 transition hover:border-[#455364] hover:bg-[#17202a] disabled:cursor-not-allowed disabled:opacity-40"
-              onClick={onSaveAll}
-              disabled={busy}
-            >
-              <Save size={15} />
-              Capture open windows
-            </button>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <label className="sr-only" htmlFor="capture-monitor">
+                Capture monitor
+              </label>
+              <SelectInput
+                id="capture-monitor"
+                value={captureMonitorId}
+                onChange={(event) => onCaptureMonitorChange(event.target.value)}
+                className="min-w-52"
+                disabled={busy || monitors.length === 0}
+              >
+                {monitors.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {monitorLabel(item)}
+                  </option>
+                ))}
+              </SelectInput>
+              <button
+                className="inline-flex h-9 items-center gap-2 rounded-md border border-[#2a323d] bg-[#111820] px-3 text-sm font-semibold text-zinc-200 transition hover:border-[#455364] hover:bg-[#17202a] disabled:cursor-not-allowed disabled:opacity-40"
+                onClick={onCaptureCurrentLayout}
+                disabled={busy || !captureMonitorId}
+              >
+                <Camera size={15} />
+                Capture current layout
+              </button>
+            </div>
           </div>
           <div className="mt-4 grid gap-2">
             {profile.apps.map((app) => (

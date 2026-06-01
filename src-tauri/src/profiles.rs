@@ -675,7 +675,7 @@ fn window_matches_app(window: &WindowInfo, app: &AppConfig, launched_pid: Option
     let process_matches = launched_pid == Some(window.process_id)
         || configured_process_name
             .as_ref()
-            .map(|expected| names_match(&expected, &window.process_name))
+            .map(|expected| names_match(expected, &window.process_name))
             .unwrap_or(false)
         || app
             .executable_path

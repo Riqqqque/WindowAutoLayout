@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AppConfig,
+  CaptureLayoutResult,
   LogEntry,
   MonitorInfo,
   RestoreResult,
@@ -12,7 +13,7 @@ export const isTauriRuntime = typeof window !== "undefined" && "__TAURI_INTERNAL
 
 const browserConfig: WindowAutoLayoutConfig = {
   schemaVersion: 2,
-  appVersion: "0.1.11",
+  appVersion: "0.1.12",
   global: {
     defaultMonitorId: "display-2",
     monitorMissingBehavior: "doNothing",
@@ -220,6 +221,8 @@ const realApi = {
     invoke<WindowAutoLayoutConfig>("save_window_layout", { profileId, appId, windowHandle }),
   saveAllCurrentLayouts: (profileId: string) =>
     invoke<WindowAutoLayoutConfig>("save_all_current_layouts", { profileId }),
+  captureCurrentLayout: (profileId: string, monitorId: string) =>
+    invoke<CaptureLayoutResult>("capture_current_layout", { profileId, monitorId }),
   logs: (maxLines = 500) => invoke<LogEntry[]>("read_logs", { maxLines }),
   clearLogs: () => invoke<void>("clear_logs"),
   setStartupEnabled: (enabled: boolean) =>
@@ -263,6 +266,52 @@ const browserApi = {
   layoutLockStatus: async () => browserLayoutLocked,
   saveWindowLayout: async () => browserConfig,
   saveAllCurrentLayouts: async () => browserConfig,
+  captureCurrentLayout: async (profileId: string, monitorId: string): Promise<CaptureLayoutResult> => {
+    const monitor = browserMonitors.find((item) => item.id === monitorId) ?? browserMonitors[0];
+    const capturedWindows = browserWindows.filter(
+      (window) => window.monitorId === monitor.id && window.isVisible && !window.isMinimized,
+    );
+    const profile = browserConfig.profiles.find((item) => item.id === profileId) ?? browserConfig.profiles[0];
+    profile.targetMonitorId = monitor.id;
+    profile.apps = capturedWindows.map((window, index) => ({
+      id: `captured-${index + 1}`,
+      displayName: window.processName === "obs64.exe" ? "OBS Studio" : window.title || window.processName.replace(/\\.exe$/i, ""),
+      executablePath: window.executablePath ?? null,
+      arguments: [],
+      workingDirectory: null,
+      processName: window.processName,
+      titleRule: window.processName === "obs64.exe" ? { mode: "startsWith", value: "OBS", caseSensitive: false } : null,
+      className: window.className,
+      targetMonitorId: monitor.id,
+      layout: { x: window.x - monitor.x, y: window.y - monitor.y, width: window.width, height: window.height },
+      windowState: "normal",
+      launchDelaySeconds: 0,
+      detectionTimeoutSeconds: 25,
+      retryIntervalMs: 700,
+      launchIfMissing: true,
+      moveIfRunning: true,
+      forceResize: true,
+      applyToAllMatchingWindows: false,
+      restoreIfMinimized: true,
+      pullHiddenWindows: true,
+      wakeRunningProcess: true,
+      allowEmptyTitle: !window.title.trim(),
+      notes: "",
+    }));
+    return {
+      config: browserConfig,
+      profileId,
+      monitor,
+      capturedCount: capturedWindows.length,
+      skippedCount: browserWindows.length - capturedWindows.length,
+      capturedWindows: capturedWindows.map((window, index) => ({
+        appId: `captured-${index + 1}`,
+        displayName: window.processName === "obs64.exe" ? "OBS Studio" : window.title || window.processName,
+        processName: window.processName,
+        title: window.title,
+      })),
+    };
+  },
   logs: async (): Promise<LogEntry[]> => [
     {
       timestamp: new Date().toISOString(),

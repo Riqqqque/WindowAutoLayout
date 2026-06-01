@@ -165,6 +165,22 @@ export interface RestoreResult {
   results: AppRestoreResult[];
 }
 
+export interface CapturedWindowSummary {
+  appId: string;
+  displayName: string;
+  processName: string;
+  title: string;
+}
+
+export interface CaptureLayoutResult {
+  config: WindowAutoLayoutConfig;
+  profileId: string;
+  monitor: MonitorInfo;
+  capturedCount: number;
+  skippedCount: number;
+  capturedWindows: CapturedWindowSummary[];
+}
+
 export interface LogEntry {
   timestamp: string;
   severity: LogSeverity;

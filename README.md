@@ -27,6 +27,7 @@ WindowAutoLayout saves workspace profiles and restores them from the app, tray m
 ## What It Does
 
 - Saves app layouts per monitor using monitor-relative coordinates.
+- Captures the visible windows on a selected monitor into the active profile.
 - Detects top-level windows with title, class name, process name, PID, bounds, visibility, minimized state, and executable path when Windows exposes it.
 - Restores a profile by launching missing apps, waiting for real matching windows, then moving and resizing them with Win32 APIs.
 - Pulls minimized and hidden tray windows forward before treating an app as missing.
@@ -54,9 +55,9 @@ After install, WindowAutoLayout lives under the current Windows user profile and
 1. Install the latest release.
 2. Open WindowAutoLayout.
 3. Pick the default monitor in Settings, or choose a target monitor on a profile.
-4. Add apps from the Apps page. The built-in OBS and Discord presets can be edited.
-5. Open and arrange those apps manually.
-6. Go to Layout, pick each real window, and save its position.
+4. Open and arrange the apps you want in the profile.
+5. On Dashboard, pick the capture monitor and press Capture current layout.
+6. Fine-tune app matching on Apps or individual windows on Layout if needed.
 7. Press Restore from Dashboard, the tray menu, startup restore, or `Ctrl+Alt+L`.
 
 For a complete setup walkthrough, see [docs/usage.md](docs/usage.md).
@@ -163,9 +164,9 @@ scripts/              Local install/update helper
 Every version tag matching `v*` builds the Windows bundles and publishes installer assets to GitHub Releases.
 
 ```powershell
-git tag v0.1.11
+git tag v0.1.12
 git push origin main
-git push origin v0.1.11
+git push origin v0.1.12
 ```
 
 The workflow validates that the tag matches `package.json`, runs TypeScript and Rust checks, builds the Tauri bundle, generates checksums, uploads CI artifacts, and publishes the release.
