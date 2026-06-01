@@ -80,7 +80,7 @@ export function AppsPage({
 
   return (
     <div className="grid gap-4 xl:grid-cols-[320px_1fr]">
-      <section className="rounded-lg border border-zinc-800 bg-zinc-900/70 p-3">
+      <section className="surface rounded-md p-3">
         <div className="flex items-center justify-between gap-2">
           <h1 className="text-lg font-semibold text-zinc-50">Apps</h1>
           <IconButton label="Add custom app" onClick={addCustomApp} variant="solid">
@@ -103,20 +103,20 @@ export function AppsPage({
               key={item.id}
               className={`rounded-md border px-3 py-2 text-left transition ${
                 item.id === app?.id
-                  ? "border-cyan-300/50 bg-cyan-300/10 text-cyan-100"
-                  : "border-zinc-800 bg-zinc-950 text-zinc-300 hover:bg-zinc-900"
+                  ? "border-[#5db7ff]/45 bg-[#5db7ff]/10 text-[#d7edff]"
+                  : "border-[#252b34] bg-[#0d1117] text-zinc-300 hover:border-[#34404d] hover:bg-[#121820]"
               }`}
               onClick={() => onSelectedAppChange(item.id)}
             >
               <span className="block truncate text-sm font-medium">{item.displayName}</span>
-              <span className="mt-1 block truncate text-xs text-zinc-500">{item.processName ?? "Process unset"}</span>
+              <span className="mt-1 block truncate text-xs text-[#8a94a3]">{item.processName ?? "Process unset"}</span>
             </button>
           ))}
         </div>
       </section>
 
       {app ? (
-        <section className="rounded-lg border border-zinc-800 bg-zinc-900/70 p-4">
+        <section className="surface rounded-md p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-lg font-semibold text-zinc-50">{app.displayName}</h2>
             <IconButton label="Remove app" onClick={() => removeApp(app.id)} variant="danger">
@@ -145,7 +145,7 @@ export function AppsPage({
                 <option value="">Use profile target</option>
                 {monitors.map((monitor) => (
                   <option key={monitor.id} value={monitor.id}>
-                    {monitor.name} · {monitor.width}x{monitor.height}
+                    {monitor.name} - {monitor.width}x{monitor.height}
                   </option>
                 ))}
               </SelectInput>
@@ -219,7 +219,7 @@ export function AppsPage({
           </div>
         </section>
       ) : (
-        <section className="rounded-lg border border-zinc-800 bg-zinc-900/70 p-8 text-center text-sm text-zinc-500">No apps in this profile</section>
+        <section className="surface rounded-md p-8 text-center text-sm text-[#8a94a3]">No apps in this profile</section>
       )}
     </div>
   );

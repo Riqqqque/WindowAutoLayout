@@ -2,6 +2,7 @@ import {
   AppWindow,
   Boxes,
   FileText,
+  LockKeyhole,
   LayoutDashboard,
   PanelsTopLeft,
   RefreshCw,
@@ -122,15 +123,12 @@ export default function App() {
       return;
     }
 
-    let disposed = false;
     const accelerator = normalizeAccelerator(config.hotkey.accelerator);
     unregisterAll()
       .then(() => register(accelerator, () => restoreSelected()))
       .catch((error) => setMessage(`Hotkey registration failed: ${String(error)}`));
 
     return () => {
-      disposed = true;
-      if (!disposed) return;
       unregisterAll().catch(() => undefined);
     };
   }, [config?.hotkey.enabled, config?.hotkey.accelerator, restoreSelected]);
@@ -216,24 +214,35 @@ export default function App() {
 
   if (!config || !profile) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-zinc-950 text-zinc-200">
-        <RefreshCw className="mr-3 animate-spin" size={18} />
-        Loading WindowAutoLayout
+      <main className="app-frame flex min-h-screen items-center justify-center text-zinc-200">
+        <div className="surface flex items-center gap-3 rounded-md px-4 py-3">
+          <RefreshCw className="animate-spin text-[#5db7ff]" size={18} />
+          <span className="text-sm font-medium">Loading WindowAutoLayout</span>
+        </div>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-zinc-950 text-zinc-100">
-      <div className="grid min-h-screen lg:grid-cols-[240px_1fr]">
-        <aside className="border-b border-zinc-800 bg-zinc-950/95 p-3 lg:border-b-0 lg:border-r">
-          <div className="flex h-12 items-center gap-3 px-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-md border border-cyan-300/40 bg-cyan-300/15 text-cyan-100">
+    <main className="app-frame min-h-screen text-zinc-100">
+      <div className="grid min-h-screen lg:grid-cols-[264px_1fr]">
+        <aside className="border-b border-[#252b34] bg-[#0c0f13]/95 p-3 lg:border-b-0 lg:border-r">
+          <div className="flex min-h-14 items-center gap-3 px-2">
+            <div className="flex h-10 w-10 items-center justify-center rounded-md border border-[#5db7ff]/35 bg-[#5db7ff]/12 text-[#b8ddff]">
               <PanelsTopLeft size={18} />
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="font-semibold text-zinc-50">WindowAutoLayout</div>
-              <div className="text-xs text-zinc-500">v{config.appVersion}</div>
+              <div className="text-xs text-[#8a94a3]">v{config.appVersion}</div>
+            </div>
+          </div>
+
+          <div className="mt-3 rounded-md border border-[#252b34] bg-[#111418] px-3 py-2">
+            <div className="text-[11px] font-semibold uppercase tracking-normal text-[#8a94a3]">Active profile</div>
+            <div className="mt-1 truncate text-sm font-medium text-zinc-100">{profile.name}</div>
+            <div className="mt-2 flex items-center gap-2 text-xs text-[#8a94a3]">
+              <span className={`h-2 w-2 rounded-full ${layoutLocked ? "bg-[#39d98a]" : "bg-[#485363]"}`} />
+              {layoutLocked ? "Layout locked" : "Lock off"}
             </div>
           </div>
 
@@ -244,14 +253,14 @@ export default function App() {
                 <button
                   key={item.id}
                   className={clsx(
-                    "flex h-10 items-center gap-3 rounded-md px-3 text-sm transition",
+                    "group flex h-10 items-center gap-3 rounded-md border px-3 text-sm transition",
                     page === item.id
-                      ? "bg-zinc-800 text-zinc-50"
-                      : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100",
+                      ? "border-[#5db7ff]/35 bg-[#182434] text-zinc-50"
+                      : "border-transparent text-[#9aa5b3] hover:border-[#252b34] hover:bg-[#121820] hover:text-zinc-100",
                   )}
                   onClick={() => setPage(item.id)}
                 >
-                  <Icon size={16} />
+                  <Icon size={16} className={page === item.id ? "text-[#5db7ff]" : "text-[#697586] group-hover:text-zinc-300"} />
                   {item.label}
                 </button>
               );
@@ -260,20 +269,34 @@ export default function App() {
         </aside>
 
         <section className="min-w-0">
-          <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-950/90 px-4 backdrop-blur">
-            <div className="truncate text-sm text-zinc-400">
-              {message ?? (dirty ? "Unsaved changes" : "Ready")}
+          <header className="sticky top-0 z-30 flex min-h-16 items-center justify-between gap-3 border-b border-[#252b34] bg-[#0b0d10]/90 px-4 backdrop-blur">
+            <div className="min-w-0">
+              <div className="truncate text-sm font-medium text-zinc-100">{message ?? (dirty ? "Unsaved changes" : "Ready")}</div>
+              <div className="mt-0.5 flex items-center gap-2 text-xs text-[#8a94a3]">
+                <span>{config.profiles.length} profiles</span>
+                <span aria-hidden="true">/</span>
+                <span>{profile.apps.length} apps in {profile.name}</span>
+                {layoutLocked && (
+                  <>
+                    <span aria-hidden="true">/</span>
+                    <span className="inline-flex items-center gap-1 text-[#a8f3cf]">
+                      <LockKeyhole size={12} />
+                      locked
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
             <div className="flex gap-2">
               <button
-                className="inline-flex h-9 items-center gap-2 rounded-md border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-200 hover:bg-zinc-800"
+                className="inline-flex h-9 items-center gap-2 rounded-md border border-[#2a323d] bg-[#111820] px-3 text-sm text-zinc-200 transition hover:border-[#455364] hover:bg-[#17202a]"
                 onClick={() => refresh().catch((error) => setMessage(String(error)))}
               >
                 <RefreshCw size={15} />
                 Refresh
               </button>
               <button
-                className="inline-flex h-9 items-center gap-2 rounded-md border border-cyan-300/40 bg-cyan-300 px-3 text-sm font-medium text-zinc-950 hover:bg-cyan-200 disabled:opacity-40"
+                className="inline-flex h-9 items-center gap-2 rounded-md border border-[#5db7ff]/60 bg-[#5db7ff] px-3 text-sm font-semibold text-[#071019] transition hover:bg-[#86caff] disabled:cursor-not-allowed disabled:opacity-40"
                 onClick={saveConfig}
                 disabled={busy || !dirty}
               >

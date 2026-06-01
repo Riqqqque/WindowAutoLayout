@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.11
+
+- Refreshed the app shell with a cleaner dashboard, sidebar, controls, status panels, and layout editor.
+- Added clearer lock/startup state and friendlier import errors for bad JSON.
+- Tightened the monitor preview so stacked saved windows stay readable.
+
 ## 0.1.10
 
 - Fixed OBS tray restore by asking OBS through its tray icon before moving the window, matching the manual click that makes OBS repaint correctly.

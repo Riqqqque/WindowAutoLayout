@@ -1,5 +1,5 @@
-import { LockKeyhole, Play, RefreshCw, Save, UnlockKeyhole } from "lucide-react";
-import type { MonitorInfo, Profile, RestoreResult, WindowAutoLayoutConfig, WindowInfo } from "../lib/types";
+import { AlertTriangle, CheckCircle2, LockKeyhole, Monitor, Play, RefreshCw, Save, UnlockKeyhole } from "lucide-react";
+import type { AppConfig, MonitorInfo, Profile, RestoreResult, WindowAutoLayoutConfig, WindowInfo } from "../lib/types";
 import { monitorLabel } from "../lib/helpers";
 import { StatusBadge } from "../components/StatusBadge";
 import { IconButton } from "../components/IconButton";
@@ -36,113 +36,186 @@ export function Dashboard({
   onRefresh,
   onSaveAll,
 }: DashboardProps) {
-  const configuredApps = profile.apps.length;
   const monitor = monitors.find((item) => item.id === (profile.targetMonitorId ?? config.global.defaultMonitorId));
+  const visibleWindows = windows.filter((window) => window.isVisible && !window.isMinimized).length;
+  const hiddenWindows = windows.filter((window) => !window.isVisible || window.isMinimized).length;
+  const startupDetail = config.startup.enabled
+    ? config.startup.restoreOnLaunch
+      ? "Restore on launch"
+      : "Starts without restore"
+    : "Startup disabled";
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[1.25fr_0.75fr]">
-      <section className="rounded-lg border border-zinc-800 bg-zinc-900/70 p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-zinc-50">WindowAutoLayout</h1>
-            <p className="mt-1 text-sm text-zinc-400">Profile: {profile.name}</p>
+    <div className="grid gap-4">
+      <section className="surface rounded-md p-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-2xl font-semibold text-zinc-50">Restore workspace</h1>
+              <span
+                className={`mt-0.5 inline-flex h-6 items-center rounded-md border px-2 text-xs font-semibold ${
+                  layoutLocked
+                    ? "border-[#39d98a]/35 bg-[#39d98a]/10 text-[#a8f3cf]"
+                    : "border-[#485363] bg-[#485363]/12 text-zinc-300"
+                }`}
+              >
+                {layoutLocked ? "Lock active" : "Manual"}
+              </span>
+            </div>
+            <p className="mt-1 max-w-2xl text-sm leading-6 text-[#9aa5b3]">
+              {profile.description?.trim() || "Launch missing apps, pull tray windows forward, and place everything on the selected monitor."}
+            </p>
           </div>
-          <div className="flex items-center gap-2">
-            <SelectInput value={profile.id} onChange={(event) => onProfileChange(event.target.value)}>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <SelectInput value={profile.id} onChange={(event) => onProfileChange(event.target.value)} className="min-w-44">
               {config.profiles.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.name}
                 </option>
               ))}
             </SelectInput>
-            <IconButton label="Restore layout" onClick={onRestore} disabled={busy} variant="solid">
+            <button
+              className="inline-flex h-10 items-center gap-2 rounded-md border border-[#5db7ff]/60 bg-[#5db7ff] px-4 text-sm font-semibold text-[#071019] transition hover:bg-[#86caff] disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={onRestore}
+              disabled={busy}
+            >
               <Play size={16} />
-            </IconButton>
-            <IconButton
-              label={layoutLocked ? "Unlock layout" : "Lock layout"}
+              Restore
+            </button>
+            <button
+              className={`inline-flex h-10 items-center gap-2 rounded-md border px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                layoutLocked
+                  ? "border-[#39d98a]/50 bg-[#39d98a]/15 text-[#a8f3cf] hover:bg-[#39d98a]/20"
+                  : "border-[#2a323d] bg-[#111820] text-zinc-200 hover:border-[#455364] hover:bg-[#17202a]"
+              }`}
               onClick={onLockToggle}
               disabled={busy}
-              variant={layoutLocked ? "solid" : "ghost"}
             >
               {layoutLocked ? <LockKeyhole size={16} /> : <UnlockKeyhole size={16} />}
-            </IconButton>
+              {layoutLocked ? "Locked" : "Lock"}
+            </button>
             <IconButton label="Refresh" onClick={onRefresh}>
               <RefreshCw size={16} />
             </IconButton>
           </div>
         </div>
+      </section>
 
-        <div className="mt-5 grid gap-3 sm:grid-cols-3">
-          <Metric label="Monitors" value={String(monitors.length)} detail={monitor ? monitorLabel(monitor) : "No target set"} />
-          <Metric label="Windows" value={String(windows.length)} detail="Visible candidates" />
-          <Metric label="Apps" value={String(configuredApps)} detail="In selected profile" />
-        </div>
+      <section className="grid gap-3 md:grid-cols-4">
+        <Metric label="Monitors" value={String(monitors.length)} detail={monitor ? monitorLabel(monitor) : "No target set"} tone="blue" />
+        <Metric label="Visible windows" value={String(visibleWindows)} detail={`${hiddenWindows} hidden or minimized`} tone="green" />
+        <Metric label="Profile apps" value={String(profile.apps.length)} detail={profile.name} tone="amber" />
+        <Metric label="Startup" value={config.startup.enabled ? "On" : "Off"} detail={startupDetail} tone="neutral" />
+      </section>
 
-        <div className="mt-5 flex flex-wrap gap-2">
-          <button
-            className="inline-flex h-10 items-center gap-2 rounded-md border border-zinc-700 bg-zinc-950 px-3 text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
-            onClick={onSaveAll}
-            disabled={busy}
-          >
-            <Save size={16} />
-            Save current layout
-          </button>
-        </div>
-
-        {lastRestore && (
-          <div className="mt-5 rounded-lg border border-zinc-800 bg-zinc-950 p-3">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-sm font-medium text-zinc-200">Last restore</span>
-              <StatusBadge value={lastRestore.status} />
+      <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+        <section className="surface rounded-md p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-zinc-50">Apps in profile</h2>
+              <p className="mt-1 text-sm text-[#8a94a3]">What restore will target right now.</p>
             </div>
+            <button
+              className="inline-flex h-9 items-center gap-2 rounded-md border border-[#2a323d] bg-[#111820] px-3 text-sm text-zinc-200 transition hover:border-[#455364] hover:bg-[#17202a] disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={onSaveAll}
+              disabled={busy}
+            >
+              <Save size={15} />
+              Capture open windows
+            </button>
+          </div>
+          <div className="mt-4 grid gap-2">
+            {profile.apps.map((app) => (
+              <AppRow key={app.id} app={app} windows={windows} lastRestore={lastRestore} />
+            ))}
+            {profile.apps.length === 0 && (
+              <div className="surface-soft rounded-md px-3 py-8 text-center text-sm text-[#8a94a3]">No apps are configured in this profile.</div>
+            )}
+          </div>
+        </section>
+
+        <section className="grid gap-4">
+          <section className="surface rounded-md p-4">
+            <h2 className="text-sm font-semibold uppercase tracking-normal text-[#8a94a3]">Health</h2>
             <div className="mt-3 grid gap-2">
-              {lastRestore.results.map((result) => (
-                <div key={result.appId} className="flex items-center justify-between gap-3 text-sm">
-                  <span className="truncate text-zinc-300">{result.displayName}</span>
-                  <StatusBadge value={result.status} />
+              {validation.length === 0 && (
+                <div className="flex items-center gap-2 rounded-md border border-[#39d98a]/25 bg-[#39d98a]/10 px-3 py-2 text-sm text-[#a8f3cf]">
+                  <CheckCircle2 size={16} />
+                  Config checks passed
+                </div>
+              )}
+              {validation.map((issue) => (
+                <div key={issue} className="flex gap-2 rounded-md border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-sm text-amber-100">
+                  <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                  <span>{issue}</span>
                 </div>
               ))}
             </div>
-          </div>
-        )}
-      </section>
+          </section>
 
-      <section className="rounded-lg border border-zinc-800 bg-zinc-900/70 p-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Health</h2>
-        <div className="mt-3 grid gap-2">
-          {validation.length === 0 && <div className="rounded-md border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-100">Config checks passed</div>}
-          {validation.map((issue) => (
-            <div key={issue} className="rounded-md border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-sm text-amber-100">
-              {issue}
+          <section className="surface rounded-md p-4">
+            <h2 className="text-sm font-semibold uppercase tracking-normal text-[#8a94a3]">Monitors</h2>
+            <div className="mt-3 grid gap-2">
+              {monitors.map((item) => (
+                <div key={item.id} className="surface-soft rounded-md px-3 py-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="flex min-w-0 items-center gap-2 truncate text-sm font-medium text-zinc-200">
+                      <Monitor size={15} className="shrink-0 text-[#5db7ff]" />
+                      {item.name}
+                    </span>
+                    {item.isPrimary && <StatusBadge value="success" className="text-[11px]" />}
+                  </div>
+                  <div className="mt-1 text-xs text-[#8a94a3]">
+                    {item.x}, {item.y} - {item.width} x {item.height} - scale {item.scaleFactor.toFixed(2)}
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-
-        <h2 className="mt-5 text-sm font-semibold uppercase tracking-wide text-zinc-500">Monitors</h2>
-        <div className="mt-3 grid gap-2">
-          {monitors.map((item) => (
-            <div key={item.id} className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2">
-              <div className="flex items-center justify-between gap-3">
-                <span className="truncate text-sm font-medium text-zinc-200">{item.name}</span>
-                {item.isPrimary && <StatusBadge value="success" className="text-[11px]" />}
-              </div>
-              <div className="mt-1 text-xs text-zinc-500">
-                {item.x}, {item.y} · {item.width} x {item.height} · scale {item.scaleFactor.toFixed(2)}
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
+          </section>
+        </section>
+      </div>
     </div>
   );
 }
 
-function Metric({ label, value, detail }: { label: string; value: string; detail: string }) {
+function AppRow({ app, windows, lastRestore }: { app: AppConfig; windows: WindowInfo[]; lastRestore?: RestoreResult | null }) {
+  const processName = app.processName?.toLowerCase();
+  const matches = processName ? windows.filter((window) => window.processName.toLowerCase() === processName).length : 0;
+  const restoreStatus = lastRestore?.results.find((result) => result.appId === app.id)?.status;
+
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
-      <div className="text-xs font-medium uppercase tracking-wide text-zinc-500">{label}</div>
+    <div className="grid gap-3 rounded-md border border-[#252b34] bg-[#0d1117] px-3 py-3 md:grid-cols-[1fr_120px_120px]">
+      <div className="min-w-0">
+        <div className="truncate text-sm font-semibold text-zinc-100">{app.displayName}</div>
+        <div className="mt-1 truncate text-xs text-[#8a94a3]">{app.processName ?? "Process unset"}</div>
+      </div>
+      <div className="text-xs text-[#8a94a3]">
+        <span className="block font-medium text-zinc-300">{app.layout.width} x {app.layout.height}</span>
+        <span>
+          {app.layout.x}, {app.layout.y}
+        </span>
+      </div>
+      <div className="flex items-center justify-start gap-2 md:justify-end">
+        {restoreStatus ? <StatusBadge value={restoreStatus} /> : <StatusBadge value={matches > 0 ? "success" : "skipped"} />}
+        <span className="text-xs text-[#8a94a3]">{matches} live</span>
+      </div>
+    </div>
+  );
+}
+
+function Metric({ label, value, detail, tone }: { label: string; value: string; detail: string; tone: "blue" | "green" | "amber" | "neutral" }) {
+  const toneClass = {
+    blue: "border-[#5db7ff]/30",
+    green: "border-[#39d98a]/30",
+    amber: "border-[#f7bf4f]/30",
+    neutral: "border-[#34404d]",
+  }[tone];
+
+  return (
+    <div className={`surface-soft rounded-md p-3 ${toneClass}`}>
+      <div className="text-[11px] font-semibold uppercase tracking-normal text-[#8a94a3]">{label}</div>
       <div className="mt-2 text-2xl font-semibold text-zinc-50">{value}</div>
-      <div className="mt-1 truncate text-xs text-zinc-500">{detail}</div>
+      <div className="mt-1 truncate text-xs text-[#8a94a3]">{detail}</div>
     </div>
   );
 }

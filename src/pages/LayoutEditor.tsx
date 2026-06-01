@@ -68,7 +68,7 @@ export function LayoutEditorPage({
 
   return (
     <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
-      <section className="rounded-lg border border-zinc-800 bg-zinc-900/70 p-4">
+      <section className="surface rounded-md p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-lg font-semibold text-zinc-50">Layout</h1>
           <div className="flex gap-2">
@@ -100,9 +100,9 @@ export function LayoutEditorPage({
       </section>
 
       <aside className="grid gap-4">
-        <section className="rounded-lg border border-zinc-800 bg-zinc-900/70 p-4">
+        <section className="surface rounded-md p-4">
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Selected app</h2>
+            <h2 className="text-sm font-semibold uppercase tracking-normal text-[#8a94a3]">Selected app</h2>
             <Toggle label="Grid" checked={showGrid} onChange={onShowGridChange} />
           </div>
           {app ? (

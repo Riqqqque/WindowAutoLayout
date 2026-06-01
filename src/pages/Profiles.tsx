@@ -66,7 +66,7 @@ export function ProfilesPage({ config, profile, monitors, onConfigChange, onProf
 
   return (
     <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
-      <section className="rounded-lg border border-zinc-800 bg-zinc-900/70 p-3">
+      <section className="surface rounded-md p-3">
         <div className="flex items-center justify-between gap-2">
           <h1 className="text-lg font-semibold text-zinc-50">Profiles</h1>
           <IconButton label="Add profile" onClick={addProfile} variant="solid">
@@ -79,19 +79,19 @@ export function ProfilesPage({ config, profile, monitors, onConfigChange, onProf
               key={item.id}
               className={`rounded-md border px-3 py-2 text-left transition ${
                 item.id === profile.id
-                  ? "border-cyan-300/50 bg-cyan-300/10 text-cyan-100"
-                  : "border-zinc-800 bg-zinc-950 text-zinc-300 hover:bg-zinc-900"
+                  ? "border-[#5db7ff]/45 bg-[#5db7ff]/10 text-[#d7edff]"
+                  : "border-[#252b34] bg-[#0d1117] text-zinc-300 hover:border-[#34404d] hover:bg-[#121820]"
               }`}
               onClick={() => onProfileChange(item.id)}
             >
               <div className="truncate text-sm font-medium">{item.name}</div>
-              <div className="mt-1 text-xs text-zinc-500">{item.apps.length} apps</div>
+              <div className="mt-1 text-xs text-[#8a94a3]">{item.apps.length} apps</div>
             </button>
           ))}
         </div>
       </section>
 
-      <section className="rounded-lg border border-zinc-800 bg-zinc-900/70 p-4">
+      <section className="surface rounded-md p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-lg font-semibold text-zinc-50">{profile.name}</h2>
           <div className="flex gap-2">
@@ -116,7 +116,7 @@ export function ProfilesPage({ config, profile, monitors, onConfigChange, onProf
               <option value="">Use global default</option>
               {monitors.map((monitor) => (
                 <option key={monitor.id} value={monitor.id}>
-                  {monitor.name} · {monitor.width}x{monitor.height}
+                  {monitor.name} - {monitor.width}x{monitor.height}
                 </option>
               ))}
             </SelectInput>

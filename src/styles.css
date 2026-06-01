@@ -4,7 +4,20 @@
   color-scheme: dark;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #09090b;
+  background: #0b0d10;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  --wal-bg: #0b0d10;
+  --wal-surface: #111418;
+  --wal-surface-strong: #161a20;
+  --wal-surface-soft: #0f1318;
+  --wal-border: #252b34;
+  --wal-border-strong: #34404d;
+  --wal-text-muted: #8a94a3;
+  --wal-blue: #5db7ff;
+  --wal-green: #39d98a;
+  --wal-amber: #f7bf4f;
 }
 
 * {
@@ -14,7 +27,7 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: #09090b;
+  background: var(--wal-bg);
 }
 
 button,
@@ -24,11 +37,43 @@ textarea {
   font: inherit;
 }
 
+button {
+  letter-spacing: 0;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid rgba(93, 183, 255, 0.55);
+  outline-offset: 2px;
+}
+
 .monitor-grid {
   background-image:
-    linear-gradient(rgba(244, 244, 245, 0.08) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(244, 244, 245, 0.08) 1px, transparent 1px);
+    linear-gradient(rgba(138, 148, 163, 0.14) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(138, 148, 163, 0.14) 1px, transparent 1px);
   background-size: 40px 40px;
+}
+
+.app-frame {
+  background:
+    linear-gradient(90deg, rgba(11, 13, 16, 0.98), rgba(13, 16, 20, 0.98));
+}
+
+.surface {
+  border: 1px solid var(--wal-border);
+  background: var(--wal-surface);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.025) inset;
+}
+
+.surface-soft {
+  border: 1px solid rgba(37, 43, 52, 0.78);
+  background: var(--wal-surface-soft);
+}
+
+.divider-line {
+  border-color: var(--wal-border);
 }
 
 ::-webkit-scrollbar {
@@ -37,11 +82,11 @@ textarea {
 }
 
 ::-webkit-scrollbar-track {
-  background: #09090b;
+  background: #0b0d10;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #3f3f46;
-  border: 3px solid #09090b;
-  border-radius: 8px;
+  background: #3a4350;
+  border: 3px solid #0b0d10;
+  border-radius: 6px;
 }

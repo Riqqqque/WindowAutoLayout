@@ -17,11 +17,17 @@ const fallbackModes: MonitorMissingBehavior[] = ["doNothing", "usePrimary", "nea
 
 export function SettingsPage({ config, monitors, configPath, logPath, onConfigChange, onSave }: SettingsProps) {
   const [importText, setImportText] = useState("");
+  const [importError, setImportError] = useState<string | null>(null);
   const exportText = useMemo(() => JSON.stringify(config, null, 2), [config]);
 
   function importConfig() {
-    const parsed = JSON.parse(importText) as WindowAutoLayoutConfig;
-    onConfigChange(parsed);
+    try {
+      const parsed = JSON.parse(importText) as WindowAutoLayoutConfig;
+      onConfigChange(parsed);
+      setImportError(null);
+    } catch (error) {
+      setImportError(`Import failed: ${String(error)}`);
+    }
   }
 
   function downloadConfig() {
@@ -36,7 +42,7 @@ export function SettingsPage({ config, monitors, configPath, logPath, onConfigCh
 
   return (
     <div className="grid gap-4 xl:grid-cols-2">
-      <section className="rounded-lg border border-zinc-800 bg-zinc-900/70 p-4">
+      <section className="surface rounded-md p-4">
         <div className="flex items-center justify-between gap-3">
           <h1 className="text-lg font-semibold text-zinc-50">Settings</h1>
           <IconButton label="Save settings" onClick={onSave} variant="solid">
@@ -53,7 +59,7 @@ export function SettingsPage({ config, monitors, configPath, logPath, onConfigCh
               <option value="">No default</option>
               {monitors.map((monitor) => (
                 <option key={monitor.id} value={monitor.id}>
-                  {monitor.name} · {monitor.width}x{monitor.height}
+                  {monitor.name} - {monitor.width}x{monitor.height}
                 </option>
               ))}
             </SelectInput>
@@ -117,7 +123,7 @@ export function SettingsPage({ config, monitors, configPath, logPath, onConfigCh
         </div>
       </section>
 
-      <section className="rounded-lg border border-zinc-800 bg-zinc-900/70 p-4">
+      <section className="surface rounded-md p-4">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-lg font-semibold text-zinc-50">Import / export</h2>
           <div className="flex gap-2">
@@ -136,6 +142,7 @@ export function SettingsPage({ config, monitors, configPath, logPath, onConfigCh
           <Field label="Import JSON">
             <TextArea value={importText} onChange={(event) => setImportText(event.target.value)} className="min-h-40 font-mono text-xs" />
           </Field>
+          {importError && <div className="rounded-md border border-rose-400/30 bg-rose-400/10 px-3 py-2 text-sm text-rose-100">{importError}</div>}
         </div>
       </section>
     </div>
