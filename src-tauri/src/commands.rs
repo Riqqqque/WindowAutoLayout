@@ -27,6 +27,7 @@ pub fn get_config(state: State<'_, AppState>) -> AppResult<WindowAutoLayoutConfi
 
 #[tauri::command]
 pub fn save_config(
+    app: AppHandle,
     state: State<'_, AppState>,
     mut next_config: WindowAutoLayoutConfig,
 ) -> AppResult<WindowAutoLayoutConfig> {
@@ -45,6 +46,7 @@ pub fn save_config(
         .lock()
         .map_err(|_| AppError::Config("Config lock was poisoned".to_string()))? =
         next_config.clone();
+    layout_lock::sync_from_config(&app, &next_config)?;
     logging::append(
         &state.config_dir,
         LogSeverity::Info,

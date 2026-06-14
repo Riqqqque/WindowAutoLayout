@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.15
+
+- Kept saved/imported layout lock settings in sync with the running lock thread.
+- Made restore results say when windows were already in their saved positions instead of reporting a move.
+
 ## 0.1.14
 
 - Made layout lock lighter for gaming by using a calmer default interval and pausing while a fullscreen foreground app is active.

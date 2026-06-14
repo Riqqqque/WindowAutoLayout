@@ -67,6 +67,36 @@ pub fn set(app: &AppHandle, enabled: bool, profile_id: Option<String>) -> AppRes
     Ok(enabled)
 }
 
+pub fn sync_from_config(app: &AppHandle, config: &WindowAutoLayoutConfig) -> AppResult<()> {
+    let state = app.state::<AppState>();
+    let (enabled, generation) = {
+        let mut lock = state
+            .layout_lock
+            .lock()
+            .map_err(|_| AppError::Config("Layout lock state was poisoned".to_string()))?;
+        let next_profile_id = config
+            .enforcement
+            .profile_id
+            .clone()
+            .or_else(|| config.startup.default_profile_id.clone());
+
+        if lock.enabled == config.enforcement.enabled && lock.profile_id == next_profile_id {
+            return Ok(());
+        }
+
+        lock.generation = lock.generation.wrapping_add(1);
+        lock.enabled = config.enforcement.enabled;
+        lock.profile_id = next_profile_id;
+        (lock.enabled, lock.generation)
+    };
+
+    if enabled {
+        spawn(app.clone(), generation);
+    }
+
+    Ok(())
+}
+
 pub fn toggle(app: &AppHandle, profile_id: Option<String>) -> AppResult<bool> {
     let next = !enabled(app)?;
     set(app, next, profile_id)

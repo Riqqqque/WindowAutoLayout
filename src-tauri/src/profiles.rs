@@ -509,6 +509,8 @@ fn restore_app(
     }
 
     let selected = selected_matching_windows(app, &matched);
+    let mut moved_count = 0usize;
+    let mut already_current_count = 0usize;
 
     for window in &selected {
         let hwnd = match windows_enum::parse_handle(&window.handle) {
@@ -531,6 +533,7 @@ fn restore_app(
             restore_minimized_window,
             activate_window,
         ) {
+            already_current_count += 1;
             continue;
         }
         if let Err(error) = window_actions::apply_layout(
@@ -560,6 +563,7 @@ fn restore_app(
             }
             return app_result(app, status, message, matched);
         }
+        moved_count += 1;
     }
 
     let status = if launched {
@@ -574,8 +578,18 @@ fn restore_app(
             hidden_count,
             selected.len()
         )
+    } else if moved_count == 0 && already_current_count > 0 {
+        format!(
+            "{} window(s) already matched the saved layout",
+            already_current_count
+        )
+    } else if already_current_count > 0 {
+        format!(
+            "Applied layout to {} window(s); {} already matched",
+            moved_count, already_current_count
+        )
     } else {
-        format!("Applied layout to {} window(s)", selected.len())
+        format!("Applied layout to {} window(s)", moved_count)
     };
     if log_events {
         let _ = logging::append(
