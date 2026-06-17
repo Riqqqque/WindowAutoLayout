@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.16
+
+- Repaired startup registration on launch when saved settings say WindowAutoLayout should start with Windows.
+- Tightened startup checks so the Run entry must point to the current app with the startup restore argument.
+
 ## 0.1.15
 
 - Kept saved/imported layout lock settings in sync with the running lock thread.

@@ -57,6 +57,19 @@ pub fn run() {
                 None,
                 "WindowAutoLayout started",
             );
+            if let Some(state) = app.try_state::<AppState>() {
+                if let Ok(config) = state.config.lock() {
+                    if let Err(error) = startup::set_startup_enabled(config.startup.enabled) {
+                        let _ = append(
+                            &config_dir,
+                            LogSeverity::Warn,
+                            None,
+                            None,
+                            format!("Startup registration sync failed: {error}"),
+                        );
+                    }
+                }
+            }
 
             wire_close_to_tray(app);
             build_tray(app)?;

@@ -4429,7 +4429,7 @@ dependencies = [
 
 [[package]]
 name = "windowautolayout"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "chrono",
  "regex",
