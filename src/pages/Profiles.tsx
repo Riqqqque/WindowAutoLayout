@@ -13,6 +13,11 @@ interface ProfilesProps {
 }
 
 export function ProfilesPage({ config, profile, monitors, onConfigChange, onProfileChange }: ProfilesProps) {
+  const missingTargetMonitor =
+    profile.targetMonitorId && !monitors.some((monitor) => monitor.id === profile.targetMonitorId)
+      ? profile.targetMonitorId
+      : null;
+
   function addProfile() {
     const id = newId("profile");
     onConfigChange({
@@ -114,6 +119,7 @@ export function ProfilesPage({ config, profile, monitors, onConfigChange, onProf
               onChange={(event) => updateProfile({ ...profile, targetMonitorId: event.target.value || null })}
             >
               <option value="">Use global default</option>
+              {missingTargetMonitor && <option value={missingTargetMonitor}>Missing: {missingTargetMonitor}</option>}
               {monitors.map((monitor) => (
                 <option key={monitor.id} value={monitor.id}>
                   {monitor.name} - {monitor.width}x{monitor.height}

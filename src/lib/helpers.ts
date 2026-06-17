@@ -40,6 +40,28 @@ export function monitorLabel(monitor?: MonitorInfo | null) {
   return `${monitor.name} ${monitor.width}x${monitor.height}${monitor.isPrimary ? " primary" : ""}`;
 }
 
+export function resolveMonitor(
+  monitors: MonitorInfo[],
+  preferredId?: string | null,
+  fallbackMode: WindowAutoLayoutConfig["global"]["monitorMissingBehavior"] = "nearestMatch",
+) {
+  if (preferredId) {
+    const exact = monitors.find((monitor) => monitor.id === preferredId);
+    if (exact) return { monitor: exact, isFallback: false };
+    if (fallbackMode === "doNothing" || fallbackMode === "askNextOpen") return { monitor: null, isFallback: false };
+  }
+
+  const fallback =
+    fallbackMode === "usePrimary"
+      ? monitors.find((monitor) => monitor.isPrimary)
+      : monitors.find((monitor) => !monitor.isPrimary) ?? monitors.find((monitor) => monitor.isPrimary);
+  return { monitor: fallback ?? null, isFallback: Boolean(preferredId && fallback) };
+}
+
+export function resolveProfileMonitor(config: WindowAutoLayoutConfig, profile: Profile, monitors: MonitorInfo[]) {
+  return resolveMonitor(monitors, profile.targetMonitorId ?? config.global.defaultMonitorId, config.global.monitorMissingBehavior);
+}
+
 export function clampRect(rect: LayoutRect, monitor?: MonitorInfo | null): LayoutRect {
   const maxWidth = Math.max(160, monitor?.width ?? 3840);
   const maxHeight = Math.max(120, monitor?.height ?? 2160);

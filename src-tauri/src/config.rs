@@ -7,7 +7,7 @@ use chrono::Utc;
 
 use crate::{
     errors::{AppError, AppResult},
-    models::{WindowAutoLayoutConfig, APP_VERSION, CONFIG_SCHEMA_VERSION},
+    models::{MonitorMissingBehavior, WindowAutoLayoutConfig, APP_VERSION, CONFIG_SCHEMA_VERSION},
 };
 
 pub const CONFIG_FILE_NAME: &str = "config.json";
@@ -33,6 +33,7 @@ pub fn load_or_create(config_dir: &Path) -> AppResult<WindowAutoLayoutConfig> {
             let mut should_save = false;
             if config.schema_version != CONFIG_SCHEMA_VERSION {
                 backup_config(&path, "pre-migration")?;
+                migrate_config(&mut config);
                 config.schema_version = CONFIG_SCHEMA_VERSION;
                 should_save = true;
             }
@@ -109,6 +110,17 @@ fn normalize_config(config: &mut WindowAutoLayoutConfig) -> bool {
     changed
 }
 
+fn migrate_config(config: &mut WindowAutoLayoutConfig) {
+    if config.schema_version < 3
+        && matches!(
+            config.global.monitor_missing_behavior,
+            MonitorMissingBehavior::DoNothing
+        )
+    {
+        config.global.monitor_missing_behavior = MonitorMissingBehavior::NearestMatch;
+    }
+}
+
 pub fn backup_config(path: &Path, reason: &str) -> AppResult<PathBuf> {
     let timestamp = Utc::now().format("%Y%m%d-%H%M%S");
     let backup = path.with_file_name(format!("config.{reason}.{timestamp}.bak.json"));
@@ -158,8 +170,28 @@ mod tests {
         let parsed: WindowAutoLayoutConfig = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(parsed.schema_version, CONFIG_SCHEMA_VERSION);
         assert_eq!(parsed.profiles[0].name, "Streaming");
+        assert_eq!(
+            parsed.global.monitor_missing_behavior,
+            MonitorMissingBehavior::NearestMatch
+        );
         assert_eq!(parsed.enforcement.interval_ms, 1000);
         assert!(parsed.enforcement.pause_for_fullscreen_games);
+    }
+
+    #[test]
+    fn migration_moves_old_default_monitor_behavior_to_nearest_match() {
+        let mut config = WindowAutoLayoutConfig {
+            schema_version: 2,
+            ..WindowAutoLayoutConfig::default()
+        };
+        config.global.monitor_missing_behavior = MonitorMissingBehavior::DoNothing;
+
+        migrate_config(&mut config);
+
+        assert_eq!(
+            config.global.monitor_missing_behavior,
+            MonitorMissingBehavior::NearestMatch
+        );
     }
 
     #[test]

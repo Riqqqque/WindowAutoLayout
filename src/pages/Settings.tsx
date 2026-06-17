@@ -19,6 +19,10 @@ export function SettingsPage({ config, monitors, configPath, logPath, onConfigCh
   const [importText, setImportText] = useState("");
   const [importError, setImportError] = useState<string | null>(null);
   const exportText = useMemo(() => JSON.stringify(config, null, 2), [config]);
+  const missingDefaultMonitor =
+    config.global.defaultMonitorId && !monitors.some((monitor) => monitor.id === config.global.defaultMonitorId)
+      ? config.global.defaultMonitorId
+      : null;
 
   function importConfig() {
     try {
@@ -57,6 +61,7 @@ export function SettingsPage({ config, monitors, configPath, logPath, onConfigCh
               onChange={(event) => onConfigChange({ ...config, global: { ...config.global, defaultMonitorId: event.target.value || null } })}
             >
               <option value="">No default</option>
+              {missingDefaultMonitor && <option value={missingDefaultMonitor}>Missing: {missingDefaultMonitor}</option>}
               {monitors.map((monitor) => (
                 <option key={monitor.id} value={monitor.id}>
                   {monitor.name} - {monitor.width}x{monitor.height}

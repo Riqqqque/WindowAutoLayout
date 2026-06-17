@@ -1,9 +1,9 @@
 {
-  "schemaVersion": 2,
-  "appVersion": "0.1.16",
+  "schemaVersion": 3,
+  "appVersion": "0.1.17",
   "global": {
     "defaultMonitorId": null,
-    "monitorMissingBehavior": "doNothing",
+    "monitorMissingBehavior": "nearestMatch",
     "warnWhenMonitorMissing": true,
     "advancedMode": false
   },

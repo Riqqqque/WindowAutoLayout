@@ -3,7 +3,7 @@ import { Field, NumberInput, Toggle } from "../components/Form";
 import { IconButton } from "../components/IconButton";
 import { MonitorPreview } from "../components/MonitorPreview";
 import { WindowPicker } from "../components/WindowPicker";
-import { clampRect, patchApp, patchProfile } from "../lib/helpers";
+import { clampRect, patchApp, patchProfile, resolveMonitor, resolveProfileMonitor } from "../lib/helpers";
 import type { LayoutRect, MonitorInfo, Profile, WindowAutoLayoutConfig, WindowInfo } from "../lib/types";
 
 interface LayoutEditorProps {
@@ -41,7 +41,9 @@ export function LayoutEditorPage({
 }: LayoutEditorProps) {
   const app = profile.apps.find((item) => item.id === selectedAppId) ?? profile.apps[0];
   const monitor =
-    monitors.find((item) => item.id === (app?.targetMonitorId ?? profile.targetMonitorId ?? config.global.defaultMonitorId)) ??
+    (app?.targetMonitorId
+      ? resolveMonitor(monitors, app.targetMonitorId, config.global.monitorMissingBehavior).monitor
+      : resolveProfileMonitor(config, profile, monitors).monitor) ??
     monitors.find((item) => !item.isPrimary) ??
     monitors[0];
 

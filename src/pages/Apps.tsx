@@ -29,6 +29,10 @@ export function AppsPage({
   onRemoveApp,
 }: AppsProps) {
   const app = profile.apps.find((item) => item.id === selectedAppId) ?? profile.apps[0];
+  const missingTargetMonitor =
+    app?.targetMonitorId && !monitors.some((monitor) => monitor.id === app.targetMonitorId)
+      ? app.targetMonitorId
+      : null;
 
   function updateApp(appId: string, update: (app: AppConfig) => AppConfig) {
     onConfigChange(patchApp(config, profile.id, appId, update));
@@ -143,6 +147,7 @@ export function AppsPage({
             <Field label="Target monitor">
               <SelectInput value={app.targetMonitorId ?? ""} onChange={(event) => updateApp(app.id, (app) => ({ ...app, targetMonitorId: event.target.value || null }))}>
                 <option value="">Use profile target</option>
+                {missingTargetMonitor && <option value={missingTargetMonitor}>Missing: {missingTargetMonitor}</option>}
                 {monitors.map((monitor) => (
                   <option key={monitor.id} value={monitor.id}>
                     {monitor.name} - {monitor.width}x{monitor.height}

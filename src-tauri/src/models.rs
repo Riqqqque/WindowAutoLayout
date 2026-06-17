@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const CONFIG_SCHEMA_VERSION: u32 = 2;
+pub const CONFIG_SCHEMA_VERSION: u32 = 3;
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -404,7 +404,7 @@ impl Default for WindowAutoLayoutConfig {
             app_version: APP_VERSION.to_string(),
             global: GlobalSettings {
                 default_monitor_id: None,
-                monitor_missing_behavior: MonitorMissingBehavior::DoNothing,
+                monitor_missing_behavior: MonitorMissingBehavior::NearestMatch,
                 warn_when_monitor_missing: true,
                 advanced_mode: false,
             },

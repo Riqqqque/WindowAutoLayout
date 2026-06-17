@@ -13,7 +13,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { register, unregisterAll } from "@tauri-apps/plugin-global-shortcut";
 import { clsx } from "clsx";
 import { api, isTauriRuntime } from "./lib/api";
-import { activeProfile, patchProfile } from "./lib/helpers";
+import { activeProfile, patchProfile, resolveProfileMonitor } from "./lib/helpers";
 import type {
   AppConfig,
   LogEntry,
@@ -64,8 +64,10 @@ export default function App() {
   const profile = useMemo(() => (config ? activeProfile(config, selectedProfileId) : null), [config, selectedProfileId]);
   const effectiveCaptureMonitorId = useMemo(() => {
     if (!config || !profile) return "";
-    const preferred = captureMonitorId ?? profile.targetMonitorId ?? config.global.defaultMonitorId ?? monitors[0]?.id ?? "";
-    return monitors.some((monitor) => monitor.id === preferred) ? preferred : (monitors[0]?.id ?? "");
+    if (captureMonitorId && monitors.some((monitor) => monitor.id === captureMonitorId)) {
+      return captureMonitorId;
+    }
+    return resolveProfileMonitor(config, profile, monitors).monitor?.id ?? monitors[0]?.id ?? "";
   }, [captureMonitorId, config, monitors, profile]);
 
   const refresh = useCallback(async () => {
@@ -92,7 +94,11 @@ export default function App() {
     setLayoutLocked(nextLayoutLocked);
     setSelectedProfileId((current) => current ?? nextConfig.startup.defaultProfileId ?? nextConfig.profiles[0]?.id ?? null);
     setSelectedAppId((current) => current ?? nextConfig.profiles[0]?.apps[0]?.id ?? null);
-    setCaptureMonitorId((current) => current ?? nextConfig.profiles[0]?.targetMonitorId ?? nextConfig.global.defaultMonitorId ?? nextMonitors[0]?.id ?? null);
+    setCaptureMonitorId((current) => {
+      if (current && nextMonitors.some((monitor) => monitor.id === current)) return current;
+      const nextProfile = activeProfile(nextConfig, nextConfig.startup.defaultProfileId ?? nextConfig.profiles[0]?.id ?? null);
+      return resolveProfileMonitor(nextConfig, nextProfile, nextMonitors).monitor?.id ?? nextMonitors[0]?.id ?? null;
+    });
     setDirty(false);
   }, []);
 
@@ -353,7 +359,7 @@ export default function App() {
                   setSelectedProfileId(id);
                   const nextProfile = config.profiles.find((item) => item.id === id);
                   setSelectedAppId(nextProfile?.apps[0]?.id ?? null);
-                  setCaptureMonitorId(nextProfile?.targetMonitorId ?? config.global.defaultMonitorId ?? monitors[0]?.id ?? null);
+                  setCaptureMonitorId(nextProfile ? resolveProfileMonitor(config, nextProfile, monitors).monitor?.id ?? monitors[0]?.id ?? null : null);
                 }}
                 onRestore={restoreSelected}
                 onLockToggle={toggleLayoutLock}

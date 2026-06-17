@@ -1,6 +1,6 @@
 import { AlertTriangle, Camera, CheckCircle2, LockKeyhole, Monitor, Play, RefreshCw, Trash2, UnlockKeyhole } from "lucide-react";
 import type { AppConfig, MonitorInfo, Profile, RestoreResult, WindowAutoLayoutConfig, WindowInfo } from "../lib/types";
-import { monitorLabel } from "../lib/helpers";
+import { monitorLabel, resolveProfileMonitor } from "../lib/helpers";
 import { StatusBadge } from "../components/StatusBadge";
 import { IconButton } from "../components/IconButton";
 import { SelectInput } from "../components/Form";
@@ -42,7 +42,11 @@ export function Dashboard({
   onCaptureCurrentLayout,
   onRemoveApp,
 }: DashboardProps) {
-  const monitor = monitors.find((item) => item.id === (profile.targetMonitorId ?? config.global.defaultMonitorId));
+  const resolvedMonitor = resolveProfileMonitor(config, profile, monitors);
+  const monitor = resolvedMonitor.monitor;
+  const monitorDetail = monitor
+    ? `${resolvedMonitor.isFallback ? "Using fallback " : ""}${monitorLabel(monitor)}`
+    : "Saved monitor missing";
   const visibleWindows = windows.filter((window) => window.isVisible && !window.isMinimized).length;
   const hiddenWindows = windows.filter((window) => !window.isVisible || window.isMinimized).length;
   const startupDetail = config.startup.enabled
@@ -108,7 +112,7 @@ export function Dashboard({
       </section>
 
       <section className="grid gap-3 md:grid-cols-4">
-        <Metric label="Monitors" value={String(monitors.length)} detail={monitor ? monitorLabel(monitor) : "No target set"} tone="blue" />
+        <Metric label="Monitors" value={String(monitors.length)} detail={monitorDetail} tone="blue" />
         <Metric label="Visible windows" value={String(visibleWindows)} detail={`${hiddenWindows} hidden or minimized`} tone="green" />
         <Metric label="Profile apps" value={String(profile.apps.length)} detail={profile.name} tone="amber" />
         <Metric label="Startup" value={config.startup.enabled ? "On" : "Off"} detail={startupDetail} tone="neutral" />

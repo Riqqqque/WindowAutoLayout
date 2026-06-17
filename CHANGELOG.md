@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.17
+
+- Fixed restores getting blocked when Windows renumbers the saved monitor.
+- Changed old default monitor-missing behavior to use the nearest available display instead of doing nothing.
+- Scaled fallback layouts to the available monitor so saved workspaces do not land off-screen after display changes.
+
 ## 0.1.16
 
 - Repaired startup registration on launch when saved settings say WindowAutoLayout should start with Windows.

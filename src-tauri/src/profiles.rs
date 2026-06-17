@@ -11,8 +11,8 @@ use crate::{
     errors::{AppError, AppResult},
     launcher, logging,
     models::{
-        AppConfig, AppRestoreResult, AppRestoreStatus, LogSeverity, MatchRule, MonitorInfo,
-        MonitorMissingBehavior, Profile, RestoreResult, RestoreStatus, TitleMatchMode,
+        AppConfig, AppRestoreResult, AppRestoreStatus, LayoutRect, LogSeverity, MatchRule,
+        MonitorInfo, MonitorMissingBehavior, Profile, RestoreResult, RestoreStatus, TitleMatchMode,
         WindowAutoLayoutConfig, WindowInfo,
     },
     monitors, processes, window_actions, windows_enum,
@@ -29,6 +29,17 @@ enum AppPresence {
 struct MatchingProcess {
     pid: u32,
     executable_path: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct MonitorResolution {
+    monitor: MonitorInfo,
+    is_fallback: bool,
+}
+
+struct RestoreTarget<'a> {
+    monitor: &'a MonitorInfo,
+    layout: &'a LayoutRect,
 }
 
 pub fn restore_profile(
@@ -110,15 +121,33 @@ fn restore_profile_inner(
     }
 
     let monitor = monitor.expect("checked above");
+    if monitor.is_fallback && log_events {
+        logging::append(
+            config_dir,
+            LogSeverity::Warn,
+            Some(&profile.name),
+            None,
+            format!("Saved monitor is missing; using {}", monitor.monitor.name),
+        )?;
+    }
     for app in &profile.apps {
         let app_monitor = resolve_app_monitor(config, &profile, app, &monitors)
             .unwrap_or_else(|| monitor.clone());
+        let layout = if app_monitor.is_fallback {
+            scaled_layout_for_monitor(&profile, app, &app_monitor.monitor)
+        } else {
+            app.layout.clone()
+        };
         let launch_missing = launch_missing_override.unwrap_or(config.startup.launch_missing_apps);
+        let target = RestoreTarget {
+            monitor: &app_monitor.monitor,
+            layout: &layout,
+        };
         results.push(restore_app(
             config_dir,
             &profile,
             app,
-            &app_monitor,
+            target,
             launch_missing,
             log_events,
             activate_visible_windows,
@@ -162,7 +191,7 @@ fn restore_profile_inner(
         status,
         started_at: started_at.to_rfc3339(),
         finished_at: Utc::now().to_rfc3339(),
-        monitor: Some(monitor),
+        monitor: Some(monitor.monitor),
         results,
     })
 }
@@ -214,7 +243,7 @@ fn restore_app(
     config_dir: &Path,
     profile: &Profile,
     app: &AppConfig,
-    monitor: &MonitorInfo,
+    target: RestoreTarget<'_>,
     launch_missing: bool,
     log_events: bool,
     activate_visible_windows: bool,
@@ -527,8 +556,9 @@ fn restore_app(
             || activate_visible_windows;
         if window_layout_is_current(
             window,
-            monitor,
+            target.monitor,
             app,
+            target.layout,
             pull_hidden_window,
             restore_minimized_window,
             activate_window,
@@ -538,8 +568,8 @@ fn restore_app(
         }
         if let Err(error) = window_actions::apply_layout(
             hwnd,
-            monitor,
-            &app.layout,
+            target.monitor,
+            target.layout,
             &app.window_state,
             app.force_resize,
             restore_minimized_window,
@@ -632,6 +662,7 @@ fn window_layout_is_current(
     window: &WindowInfo,
     monitor: &MonitorInfo,
     app: &AppConfig,
+    layout: &LayoutRect,
     pull_hidden_window: bool,
     restore_minimized_window: bool,
     activate_window: bool,
@@ -644,7 +675,7 @@ fn window_layout_is_current(
         return false;
     }
 
-    let rect = window_actions::absolute_rect(monitor, &app.layout);
+    let rect = window_actions::absolute_rect(monitor, layout);
     nearly_equal(window.x, rect.left)
         && nearly_equal(window.y, rect.top)
         && (!app.force_resize
@@ -888,10 +919,13 @@ fn resolve_app_monitor(
     profile: &Profile,
     app: &AppConfig,
     monitors: &[MonitorInfo],
-) -> Option<MonitorInfo> {
+) -> Option<MonitorResolution> {
     if let Some(id) = &app.target_monitor_id {
         if let Some(monitor) = monitors.iter().find(|monitor| &monitor.id == id) {
-            return Some(monitor.clone());
+            return Some(MonitorResolution {
+                monitor: monitor.clone(),
+                is_fallback: false,
+            });
         }
         if matches!(
             config.global.monitor_missing_behavior,
@@ -908,7 +942,7 @@ fn resolve_profile_monitor(
     config: &WindowAutoLayoutConfig,
     profile: &Profile,
     monitors: &[MonitorInfo],
-) -> Option<MonitorInfo> {
+) -> Option<MonitorResolution> {
     let requested = profile
         .target_monitor_id
         .as_ref()
@@ -916,19 +950,25 @@ fn resolve_profile_monitor(
 
     if let Some(id) = requested {
         if let Some(monitor) = monitors.iter().find(|monitor| &monitor.id == id) {
-            return Some(monitor.clone());
+            return Some(MonitorResolution {
+                monitor: monitor.clone(),
+                is_fallback: false,
+            });
         }
 
         return match config.global.monitor_missing_behavior {
             MonitorMissingBehavior::DoNothing | MonitorMissingBehavior::AskNextOpen => None,
-            MonitorMissingBehavior::UsePrimary => {
-                monitors.iter().find(|monitor| monitor.is_primary).cloned()
-            }
+            MonitorMissingBehavior::UsePrimary => monitors
+                .iter()
+                .find(|monitor| monitor.is_primary)
+                .cloned()
+                .map(fallback_monitor),
             MonitorMissingBehavior::NearestMatch => monitors
                 .iter()
                 .find(|monitor| !monitor.is_primary)
                 .cloned()
-                .or_else(|| monitors.iter().find(|monitor| monitor.is_primary).cloned()),
+                .or_else(|| monitors.iter().find(|monitor| monitor.is_primary).cloned())
+                .map(fallback_monitor),
         };
     }
 
@@ -937,6 +977,66 @@ fn resolve_profile_monitor(
         .find(|monitor| !monitor.is_primary)
         .cloned()
         .or_else(|| monitors.iter().find(|monitor| monitor.is_primary).cloned())
+        .map(|monitor| MonitorResolution {
+            monitor,
+            is_fallback: false,
+        })
+}
+
+fn fallback_monitor(monitor: MonitorInfo) -> MonitorResolution {
+    MonitorResolution {
+        monitor,
+        is_fallback: true,
+    }
+}
+
+fn scaled_layout_for_monitor(
+    profile: &Profile,
+    app: &AppConfig,
+    monitor: &MonitorInfo,
+) -> LayoutRect {
+    let Some((canvas_width, canvas_height)) = profile_layout_canvas(profile) else {
+        return app.layout.clone();
+    };
+    if canvas_width <= 0 || canvas_height <= 0 || monitor.width <= 0 || monitor.height <= 0 {
+        return app.layout.clone();
+    }
+
+    let scale_x = monitor.width as f64 / canvas_width as f64;
+    let scale_y = monitor.height as f64 / canvas_height as f64;
+    let x = scale_i32(app.layout.x, scale_x).clamp(0, monitor.width.saturating_sub(1));
+    let y = scale_i32(app.layout.y, scale_y).clamp(0, monitor.height.saturating_sub(1));
+    let available_width = (monitor.width - x).max(1);
+    let available_height = (monitor.height - y).max(1);
+    let width =
+        scale_i32(app.layout.width, scale_x).clamp(80.min(available_width), available_width);
+    let height =
+        scale_i32(app.layout.height, scale_y).clamp(80.min(available_height), available_height);
+
+    LayoutRect {
+        x,
+        y,
+        width,
+        height,
+    }
+}
+
+fn profile_layout_canvas(profile: &Profile) -> Option<(i32, i32)> {
+    let right = profile
+        .apps
+        .iter()
+        .map(|app| app.layout.x.saturating_add(app.layout.width))
+        .max()?;
+    let bottom = profile
+        .apps
+        .iter()
+        .map(|app| app.layout.y.saturating_add(app.layout.height))
+        .max()?;
+    Some((right.max(1), bottom.max(1)))
+}
+
+fn scale_i32(value: i32, scale: f64) -> i32 {
+    ((value as f64) * scale).round() as i32
 }
 
 fn app_result(
@@ -1241,10 +1341,125 @@ mod tests {
         };
 
         assert!(window_layout_is_current(
-            &window, &monitor, &app, false, false, false
+            &window,
+            &monitor,
+            &app,
+            &app.layout,
+            false,
+            false,
+            false
         ));
         assert!(!window_layout_is_current(
-            &window, &monitor, &app, false, false, true
+            &window,
+            &monitor,
+            &app,
+            &app.layout,
+            false,
+            false,
+            true
         ));
+    }
+
+    #[test]
+    fn missing_profile_monitor_uses_secondary_nearest_match() {
+        let mut config = WindowAutoLayoutConfig::default();
+        config.global.monitor_missing_behavior = MonitorMissingBehavior::NearestMatch;
+        config.profiles[0].target_monitor_id = Some("missing-display".into());
+        let monitors = vec![
+            test_monitor("primary", true, 0, 0, 2048, 1152),
+            test_monitor("secondary", false, -3072, -261, 2560, 1440),
+        ];
+
+        let resolved = resolve_profile_monitor(&config, &config.profiles[0], &monitors)
+            .expect("fallback monitor");
+
+        assert_eq!(resolved.monitor.id, "secondary");
+        assert!(resolved.is_fallback);
+    }
+
+    #[test]
+    fn fallback_layout_scales_profile_canvas_to_target_monitor() {
+        let monitor = test_monitor("secondary", false, -3072, -261, 2560, 1440);
+        let mut profile = Profile {
+            id: "profile".into(),
+            name: "Streaming".into(),
+            description: None,
+            target_monitor_id: Some("missing".into()),
+            apps: vec![
+                AppConfig::new_preset(
+                    "obs",
+                    "OBS Studio",
+                    "obs64.exe",
+                    LayoutRect {
+                        x: 0,
+                        y: 0,
+                        width: 1920,
+                        height: 2160,
+                    },
+                ),
+                AppConfig::new_preset(
+                    "discord",
+                    "Discord",
+                    "Discord.exe",
+                    LayoutRect {
+                        x: 1920,
+                        y: 0,
+                        width: 1920,
+                        height: 1080,
+                    },
+                ),
+                AppConfig::new_preset(
+                    "codex",
+                    "Codex",
+                    "Codex.exe",
+                    LayoutRect {
+                        x: 1920,
+                        y: 1080,
+                        width: 1920,
+                        height: 1080,
+                    },
+                ),
+            ],
+            startup_restore: true,
+            enforce_after_restore: true,
+        };
+        let codex = profile.apps.pop().expect("codex app");
+
+        let layout = scaled_layout_for_monitor(&profile, &codex, &monitor);
+
+        assert_eq!(
+            layout,
+            LayoutRect {
+                x: 1280,
+                y: 720,
+                width: 1280,
+                height: 720
+            }
+        );
+    }
+
+    fn test_monitor(
+        id: &str,
+        is_primary: bool,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+    ) -> MonitorInfo {
+        MonitorInfo {
+            id: id.into(),
+            name: id.into(),
+            device_name: id.into(),
+            x,
+            y,
+            width,
+            height,
+            work_x: x,
+            work_y: y,
+            work_width: width,
+            work_height: height,
+            scale_factor: 1.0,
+            is_primary,
+        }
     }
 }

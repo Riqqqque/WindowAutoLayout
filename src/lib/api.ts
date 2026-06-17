@@ -12,11 +12,11 @@ import type {
 export const isTauriRuntime = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 const browserConfig: WindowAutoLayoutConfig = {
-  schemaVersion: 2,
-  appVersion: "0.1.16",
+  schemaVersion: 3,
+  appVersion: "0.1.17",
   global: {
     defaultMonitorId: "display-2",
-    monitorMissingBehavior: "doNothing",
+    monitorMissingBehavior: "nearestMatch",
     warnWhenMonitorMissing: true,
     advancedMode: false,
   },
