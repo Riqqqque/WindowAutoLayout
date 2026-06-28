@@ -368,7 +368,7 @@ fn squirrel_app_candidates(app_root: &Path, process_name: &str) -> Vec<LaunchTar
         })
         .collect::<Vec<_>>();
 
-    candidates.sort_by(|left, right| right.0.cmp(&left.0));
+    candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.0));
     candidates
         .into_iter()
         .map(|(_, candidate)| candidate)
