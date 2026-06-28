@@ -1,6 +1,6 @@
 {
   "schemaVersion": 3,
-  "appVersion": "0.1.17",
+  "appVersion": "0.1.18",
   "global": {
     "defaultMonitorId": null,
     "monitorMissingBehavior": "nearestMatch",
@@ -29,7 +29,7 @@
     "enabled": false,
     "profileId": "profile-streaming",
     "durationSeconds": 30,
-    "intervalMs": 1000,
+    "intervalMs": 2000,
     "pauseForFullscreenGames": true
   },
   "profiles": [

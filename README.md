@@ -75,7 +75,7 @@ More details and recovery checks are in [docs/troubleshooting.md](docs/troublesh
 
 ## Layout Lock
 
-The lock button repeatedly reapplies the selected profile while it is enabled. It is meant for live setups where the layout should recover after Show Desktop, accidental minimize, dragging, or another app stealing placement. The lock interval is clamped for safety so it stays responsive without turning into a heavy polling loop.
+The lock button watches the selected profile and only runs a full restore when one of its managed windows changes position, visibility, minimized state, or disappears. It is meant for live setups where the layout should recover after Show Desktop, accidental minimize, dragging, or another app stealing placement without burning CPU while everything is already stable. The lock interval is clamped to a low-impact range, and fullscreen non-profile apps get a longer pause so games are not polled hard.
 
 ## Startup Restore
 
@@ -126,11 +126,15 @@ Requirements:
 - Microsoft WebView2 Runtime
 
 ```powershell
-npm install
+npm ci
 npm run check
 cd src-tauri
+cargo fmt --check
+cargo check
 cargo test
+cargo clippy --all-targets -- -D warnings
 cd ..
+npm audit --audit-level=moderate
 npm run desktop:build
 ```
 
@@ -164,12 +168,12 @@ scripts/              Local install/update helper
 Every version tag matching `v*` builds the Windows bundles and publishes installer assets to GitHub Releases.
 
 ```powershell
-git tag v0.1.17
+git tag v0.1.18
 git push origin main
-git push origin v0.1.17
+git push origin v0.1.18
 ```
 
-The workflow validates that the tag matches `package.json`, runs TypeScript and Rust checks, builds the Tauri bundle, generates checksums, uploads CI artifacts, and publishes the release.
+The workflow validates that the tag matches `package.json`, runs TypeScript, frontend audit, and Rust checks, builds the Tauri bundle, generates checksums, uploads CI artifacts, and publishes the release.
 
 ## License
 

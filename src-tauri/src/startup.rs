@@ -49,12 +49,11 @@ mod tests {
 
     #[test]
     fn startup_command_quotes_exe_and_adds_startup_arg() {
-        let exe =
-            PathBuf::from(r"C:\Users\Cristian\AppData\Local\WindowAutoLayout\WindowAutoLayout.exe");
+        let exe = PathBuf::from(r"C:\Apps\WindowAutoLayout\WindowAutoLayout.exe");
 
         assert_eq!(
             startup_command(&exe),
-            r#""C:\Users\Cristian\AppData\Local\WindowAutoLayout\WindowAutoLayout.exe" --startup-restore"#
+            r#""C:\Apps\WindowAutoLayout\WindowAutoLayout.exe" --startup-restore"#
         );
     }
 

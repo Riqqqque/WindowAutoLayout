@@ -105,7 +105,7 @@ Fix:
 
 The Windows Show Desktop command can minimize windows. Layout lock is the recovery mechanism.
 
-Turn on layout lock for the profile. While the lock is active, WindowAutoLayout reapplies the profile so matching windows come back to their saved positions.
+Turn on layout lock for the profile. While the lock is active, WindowAutoLayout watches the managed windows and restores the profile when one moves, minimizes, hides, or disappears.
 
 ## Hotkey Does Nothing
 
@@ -151,8 +151,11 @@ Use these before trusting a release:
 npm run check
 cd src-tauri
 cargo fmt --check
+cargo check
 cargo test
+cargo clippy --all-targets -- -D warnings
 cd ..
+npm audit --audit-level=moderate
 npm run desktop:build
 powershell -ExecutionPolicy Bypass -File scripts\install-current.ps1 -SkipBuild
 ```

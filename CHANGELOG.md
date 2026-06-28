@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.18
+
+- Cut layout lock CPU use by only running full restore work when managed windows actually change.
+- Kept layout lock paused longer while a fullscreen non-profile app is foreground, so games do not get polled hard.
+- Added tests around lock change detection and managed-window signatures.
+- Updated the Windows build workflow to use the locked npm install, Rust format/check/test/clippy, and clean frontend dependency audit.
+
 ## 0.1.17
 
 - Fixed restores getting blocked when Windows renumbers the saved monitor.

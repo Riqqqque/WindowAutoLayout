@@ -101,7 +101,7 @@ fn normalize_config(config: &mut WindowAutoLayoutConfig) -> bool {
         }
     }
 
-    let interval_ms = config.enforcement.interval_ms.clamp(1000, 5000);
+    let interval_ms = config.enforcement.interval_ms.clamp(2000, 5000);
     if config.enforcement.interval_ms != interval_ms {
         config.enforcement.interval_ms = interval_ms;
         changed = true;
@@ -174,7 +174,7 @@ mod tests {
             parsed.global.monitor_missing_behavior,
             MonitorMissingBehavior::NearestMatch
         );
-        assert_eq!(parsed.enforcement.interval_ms, 1000);
+        assert_eq!(parsed.enforcement.interval_ms, 2000);
         assert!(parsed.enforcement.pause_for_fullscreen_games);
     }
 
@@ -208,6 +208,6 @@ mod tests {
         config.enforcement.interval_ms = 150;
 
         assert!(normalize_config(&mut config));
-        assert_eq!(config.enforcement.interval_ms, 1000);
+        assert_eq!(config.enforcement.interval_ms, 2000);
     }
 }

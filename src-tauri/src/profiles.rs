@@ -74,6 +74,57 @@ pub fn restore_profile_silent(
     )
 }
 
+pub fn profile_window_signature(
+    config: &WindowAutoLayoutConfig,
+    profile_id: Option<&str>,
+) -> AppResult<String> {
+    let profile = resolve_profile(config, profile_id)?;
+    let windows = windows_enum::list_windows_with_hidden(true).unwrap_or_default();
+    Ok(profile_window_signature_from_windows(profile, &windows))
+}
+
+fn profile_window_signature_from_windows(profile: &Profile, windows: &[WindowInfo]) -> String {
+    profile
+        .apps
+        .iter()
+        .map(|app| app_window_signature(app, windows))
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn app_window_signature(app: &AppConfig, windows: &[WindowInfo]) -> String {
+    let mut matched = windows
+        .iter()
+        .filter(|window| window_matches_app(window, app, None))
+        .cloned()
+        .collect::<Vec<_>>();
+    sort_matching_windows(&mut matched);
+    let selected = selected_matching_windows(app, &matched);
+
+    if selected.is_empty() {
+        return format!("{}:missing", app.id);
+    }
+
+    let windows = selected
+        .iter()
+        .map(|window| {
+            format!(
+                "{}:{}:{}:{}:{}:{}:{}:{}",
+                window.handle,
+                window.process_id,
+                window.is_visible,
+                window.is_minimized,
+                window.x,
+                window.y,
+                window.width,
+                window.height
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("{}:{windows}", app.id)
+}
+
 fn restore_profile_inner(
     config_dir: &Path,
     config: &WindowAutoLayoutConfig,
@@ -203,7 +254,7 @@ pub fn enforce_profile_for(
     duration_seconds: u64,
     interval_ms: u64,
 ) -> AppResult<RestoreResult> {
-    let interval = interval_ms.clamp(1000, 5000);
+    let interval = interval_ms.clamp(2000, 5000);
     let until = Instant::now() + Duration::from_secs(duration_seconds.max(1));
     let mut last = restore_profile(config_dir, config, profile_id.clone(), Some(false))?;
 
@@ -647,6 +698,11 @@ pub fn find_matching_windows(app: &AppConfig, launched_pid: Option<u32>) -> Vec<
             .into_iter()
             .filter(|window| window_matches_app(window, app, launched_pid))
             .collect::<Vec<_>>();
+    sort_matching_windows(&mut matched);
+    matched
+}
+
+fn sort_matching_windows(matched: &mut [WindowInfo]) {
     matched.sort_by(|left, right| {
         right
             .is_visible
@@ -655,7 +711,6 @@ pub fn find_matching_windows(app: &AppConfig, launched_pid: Option<u32>) -> Vec<
             .then((right.width * right.height).cmp(&(left.width * left.height)))
             .then(left.title.cmp(&right.title))
     });
-    matched
 }
 
 fn window_layout_is_current(
@@ -1409,9 +1464,9 @@ mod tests {
                     },
                 ),
                 AppConfig::new_preset(
-                    "codex",
-                    "Codex",
-                    "Codex.exe",
+                    "editor",
+                    "Editor",
+                    "Editor.exe",
                     LayoutRect {
                         x: 1920,
                         y: 1080,
@@ -1423,9 +1478,9 @@ mod tests {
             startup_restore: true,
             enforce_after_restore: true,
         };
-        let codex = profile.apps.pop().expect("codex app");
+        let editor = profile.apps.pop().expect("editor app");
 
-        let layout = scaled_layout_for_monitor(&profile, &codex, &monitor);
+        let layout = scaled_layout_for_monitor(&profile, &editor, &monitor);
 
         assert_eq!(
             layout,
@@ -1435,6 +1490,57 @@ mod tests {
                 width: 1280,
                 height: 720
             }
+        );
+    }
+
+    #[test]
+    fn profile_signature_changes_when_tracked_window_moves_or_minimizes() {
+        let profile = Profile {
+            id: "profile".into(),
+            name: "Streaming".into(),
+            description: None,
+            target_monitor_id: None,
+            apps: vec![AppConfig::new_preset(
+                "discord",
+                "Discord",
+                "Discord.exe",
+                LayoutRect::default(),
+            )],
+            startup_restore: true,
+            enforce_after_restore: true,
+        };
+        let window = WindowInfo {
+            handle: "0x1".into(),
+            title: "Discord".into(),
+            class_name: "Chrome_WidgetWin_1".into(),
+            process_id: 10,
+            process_name: "Discord.exe".into(),
+            executable_path: None,
+            monitor_id: None,
+            x: 0,
+            y: 0,
+            width: 1000,
+            height: 700,
+            is_visible: true,
+            is_minimized: false,
+        };
+        let moved = WindowInfo {
+            x: 20,
+            ..window.clone()
+        };
+        let minimized = WindowInfo {
+            is_minimized: true,
+            ..window.clone()
+        };
+
+        let base = profile_window_signature_from_windows(&profile, &[window]);
+        assert_ne!(
+            base,
+            profile_window_signature_from_windows(&profile, &[moved])
+        );
+        assert_ne!(
+            base,
+            profile_window_signature_from_windows(&profile, &[minimized])
         );
     }
 

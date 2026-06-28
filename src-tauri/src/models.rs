@@ -430,7 +430,7 @@ impl Default for WindowAutoLayoutConfig {
                 enabled: false,
                 profile_id: Some(default_profile_id.clone()),
                 duration_seconds: 30,
-                interval_ms: 1000,
+                interval_ms: 2000,
                 pause_for_fullscreen_games: true,
             },
             profiles: vec![Profile {

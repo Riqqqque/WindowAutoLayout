@@ -11,7 +11,7 @@ WindowAutoLayout is built around one idea: save a workspace once, then bring it 
 | Layout | The saved X, Y, width, and height for an app window |
 | Target monitor | The monitor where the saved layout should land |
 | Restore | The action that launches missing apps, finds windows, and moves them |
-| Layout lock | A temporary keep-in-place mode that reapplies a profile repeatedly |
+| Layout lock | A temporary keep-in-place mode that restores a profile when managed windows change |
 
 ## First Setup
 
@@ -136,14 +136,14 @@ No admin rights are required for normal startup registration.
 
 Layout lock is for keeping a live workspace in place.
 
-When enabled, WindowAutoLayout repeatedly restores the selected profile. That means:
+When enabled, WindowAutoLayout watches the selected profile and restores only when a managed window changes. That means:
 
 - Show Desktop gets corrected while the lock is active.
 - Accidentally dragged windows snap back.
 - Minimized matching windows get pulled back if the app settings allow it.
-- The app keeps using the selected profile until the lock is disabled or the lock duration ends.
+- The app keeps watching the selected profile until the lock is disabled or the lock duration ends.
 
-The lock interval is clamped internally to avoid heavy background work.
+The lock interval is clamped internally to 2-5 seconds. If a fullscreen app that is not part of the profile is foreground, WindowAutoLayout pauses lock work longer so games are not polled hard.
 
 ## Hotkey
 

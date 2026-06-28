@@ -12,6 +12,10 @@ use crate::{
     windows_enum,
 };
 
+const MIN_LOCK_INTERVAL_MS: u64 = 2_000;
+const MAX_LOCK_INTERVAL_MS: u64 = 5_000;
+const FULLSCREEN_PAUSE_INTERVAL_MS: u64 = 10_000;
+
 pub fn enabled(app: &AppHandle) -> AppResult<bool> {
     let state = app.state::<AppState>();
     let enabled = state
@@ -104,6 +108,8 @@ pub fn toggle(app: &AppHandle, profile_id: Option<String>) -> AppResult<bool> {
 
 fn spawn(app: AppHandle, generation: u64) {
     let mut allow_launch_missing = true;
+    let mut last_signature: Option<String> = None;
+    let mut force_restore = true;
     thread::spawn(move || loop {
         let (config_dir, config, profile_id, interval_ms) = {
             let state = app.state::<AppState>();
@@ -119,7 +125,10 @@ fn spawn(app: AppHandle, generation: u64) {
                 Ok(config) => config.clone(),
                 Err(_) => break,
             };
-            let interval_ms = config.enforcement.interval_ms.clamp(1000, 5000);
+            let interval_ms = config
+                .enforcement
+                .interval_ms
+                .clamp(MIN_LOCK_INTERVAL_MS, MAX_LOCK_INTERVAL_MS);
             (
                 state.config_dir.clone(),
                 config,
@@ -128,17 +137,48 @@ fn spawn(app: AppHandle, generation: u64) {
             )
         };
 
-        if !should_pause_for_fullscreen(&config, profile_id.as_deref()) {
-            let _ = profiles::restore_profile_silent(
-                &config_dir,
-                &config,
-                profile_id.clone(),
-                Some(allow_launch_missing),
+        let sleep_ms = if should_pause_for_fullscreen(&config, profile_id.as_deref()) {
+            FULLSCREEN_PAUSE_INTERVAL_MS
+        } else {
+            let current_signature =
+                profiles::profile_window_signature(&config, profile_id.as_deref()).ok();
+            let should_restore = should_restore_for_signature(
+                force_restore,
+                current_signature.as_ref(),
+                last_signature.as_ref(),
             );
-            allow_launch_missing = false;
-        }
-        thread::sleep(Duration::from_millis(interval_ms));
+
+            if should_restore {
+                let _ = profiles::restore_profile_silent(
+                    &config_dir,
+                    &config,
+                    profile_id.clone(),
+                    Some(allow_launch_missing),
+                );
+                allow_launch_missing = false;
+                force_restore = false;
+                last_signature = profiles::profile_window_signature(&config, profile_id.as_deref())
+                    .ok()
+                    .or(current_signature);
+            }
+
+            interval_ms
+        };
+
+        thread::sleep(Duration::from_millis(sleep_ms));
     });
+}
+
+fn should_restore_for_signature(
+    force_restore: bool,
+    current_signature: Option<&String>,
+    last_signature: Option<&String>,
+) -> bool {
+    force_restore
+        || current_signature
+            .zip(last_signature)
+            .map(|(current, last)| current != last)
+            .unwrap_or(true)
 }
 
 fn should_pause_for_fullscreen(config: &WindowAutoLayoutConfig, profile_id: Option<&str>) -> bool {
@@ -220,5 +260,30 @@ mod tests {
 
         assert!(covers_monitor(&fullscreen, &monitor));
         assert!(!covers_monitor(&maximized, &monitor));
+    }
+
+    #[test]
+    fn restores_when_signature_changes_or_first_pass_is_forced() {
+        let current = "app:0x1:true:false:0:0:100:100".to_string();
+        let same = current.clone();
+        let moved = "app:0x1:true:false:10:0:100:100".to_string();
+
+        assert!(should_restore_for_signature(
+            true,
+            Some(&current),
+            Some(&same)
+        ));
+        assert!(!should_restore_for_signature(
+            false,
+            Some(&current),
+            Some(&same)
+        ));
+        assert!(should_restore_for_signature(
+            false,
+            Some(&moved),
+            Some(&same)
+        ));
+        assert!(should_restore_for_signature(false, None, Some(&same)));
+        assert!(should_restore_for_signature(false, Some(&current), None));
     }
 }

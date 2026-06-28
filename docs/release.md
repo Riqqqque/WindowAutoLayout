@@ -18,7 +18,7 @@ Update these together for every release:
 The tag must match the package version:
 
 ```text
-package.json version 0.1.17 -> tag v0.1.17
+package.json version 0.1.18 -> tag v0.1.18
 ```
 
 ## Local Finish Pass
@@ -29,8 +29,11 @@ Run the checks and build locally:
 npm run check
 cd src-tauri
 cargo fmt --check
+cargo check
 cargo test
+cargo clippy --all-targets -- -D warnings
 cd ..
+npm audit --audit-level=moderate
 npm run desktop:build
 ```
 
@@ -69,15 +72,16 @@ Commit the release changes, then push main and the version tag:
 
 ```powershell
 git push origin main
-git tag v0.1.17
-git push origin v0.1.17
+git tag v0.1.18
+git push origin v0.1.18
 ```
 
 The GitHub workflow:
 
 - validates the tag matches `package.json`
 - runs TypeScript checks
-- runs Rust tests
+- runs the frontend dependency audit
+- runs Rust format, check, test, and clippy passes
 - builds the Windows Tauri bundle
 - generates `.sha256` files for installers
 - uploads CI artifacts
@@ -97,7 +101,7 @@ WindowAutoLayout_<version>_x64_en-US.msi.sha256
 Verify the published release:
 
 ```powershell
-gh release view v0.1.17 --repo Riqqqque/WindowAutoLayout --json url,tagName,name,isDraft,isPrerelease,assets
+gh release view v0.1.18 --repo Riqqqque/WindowAutoLayout --json url,tagName,name,isDraft,isPrerelease,assets
 ```
 
 ## Troubleshooting Release Builds

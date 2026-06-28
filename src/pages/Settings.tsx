@@ -101,7 +101,7 @@ export function SettingsPage({ config, monitors, configPath, logPath, onConfigCh
           </Field>
           <Field label="Lock interval ms">
             <NumberInput
-              min={1000}
+              min={2000}
               max={5000}
               step={500}
               value={config.enforcement.intervalMs}
