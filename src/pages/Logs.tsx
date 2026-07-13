@@ -32,9 +32,12 @@ export function LogsPage({ logs, onRefresh, onClear, onOpen }: LogsProps) {
   }
 
   return (
-    <section className="surface rounded-md p-4">
+    <section className="panel p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-lg font-semibold text-zinc-50">Logs</h1>
+        <div>
+          <h1 className="section-heading">Activity log</h1>
+          <div className="mt-1 text-xs text-[#71818c]">{filtered.length} entries</div>
+        </div>
         <div className="flex gap-2">
           <IconButton label="Refresh logs" onClick={onRefresh}>
             <RefreshCw size={16} />
@@ -55,20 +58,20 @@ export function LogsPage({ logs, onRefresh, onClear, onOpen }: LogsProps) {
         <TextInput placeholder="Search logs" value={query} onChange={(event) => setQuery(event.target.value)} />
       </div>
 
-      <div className="mt-4 overflow-hidden rounded-md border border-[#252b34]">
+      <div className="data-list mt-4">
         <div className="max-h-[520px] overflow-auto">
           {filtered.map((entry, index) => (
-            <div key={`${entry.timestamp}-${index}`} className="grid gap-2 border-b border-[#151a21] bg-[#0d1117] px-3 py-2 text-sm last:border-b-0 md:grid-cols-[170px_80px_1fr]">
-              <span className="text-xs text-[#8a94a3]">{new Date(entry.timestamp).toLocaleString()}</span>
+            <div key={`${entry.timestamp}-${index}`} className="data-row grid gap-2 px-3 py-2.5 text-sm md:grid-cols-[170px_80px_1fr]">
+              <span className="text-xs text-[#71818c]">{new Date(entry.timestamp).toLocaleString()}</span>
               <StatusBadge value={entry.severity} />
               <span className="text-zinc-300">
-                {entry.profile && <span className="text-[#8a94a3]">{entry.profile} / </span>}
-                {entry.app && <span className="text-[#8a94a3]">{entry.app} / </span>}
+                {entry.profile && <span className="text-[#71818c]">{entry.profile} / </span>}
+                {entry.app && <span className="text-[#71818c]">{entry.app} / </span>}
                 {entry.message}
               </span>
             </div>
           ))}
-          {filtered.length === 0 && <div className="px-3 py-8 text-center text-sm text-[#8a94a3]">No log entries</div>}
+          {filtered.length === 0 && <div className="px-3 py-8 text-center text-sm text-[#71818c]">No log entries</div>}
         </div>
       </div>
     </section>

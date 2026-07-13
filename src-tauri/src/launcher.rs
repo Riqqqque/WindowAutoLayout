@@ -14,6 +14,7 @@ use winreg::{
 use crate::{
     errors::{AppError, AppResult},
     models::AppConfig,
+    processes,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,13 +48,8 @@ pub fn launch_app_with_path(
     command.args(&target.arguments);
     command.args(&app.arguments);
 
-    if let Some(working_directory) = &app.working_directory {
-        let working_directory = working_directory.trim();
-        if !working_directory.is_empty() && Path::new(working_directory).exists() {
-            command.current_dir(working_directory);
-        }
-    } else if let Some(parent) = target.path.parent() {
-        command.current_dir(parent);
+    if let Some(working_directory) = launch_working_directory(app, &target.path) {
+        command.current_dir(working_directory);
     }
 
     let child = command.spawn()?;
@@ -71,6 +67,17 @@ fn launch_candidates(app: &AppConfig, preferred_path: Option<&str>) -> Vec<Launc
 
     push_path_candidate(&mut candidates, preferred_path);
     push_path_candidate(&mut candidates, app.executable_path.as_deref());
+    if let Some(family) = app
+        .executable_path
+        .as_deref()
+        .and_then(processes::windows_app_package_family)
+    {
+        candidates.push(LaunchTarget {
+            path: PathBuf::from(format!(r"shell:AppsFolder\{family}!App")),
+            arguments: Vec::new(),
+            use_shell: true,
+        });
+    }
 
     if let Some(process_name) = configured_process_name(app) {
         candidates.extend(app_path_registry_candidates(&process_name));
@@ -101,6 +108,9 @@ fn push_path_candidate(candidates: &mut Vec<LaunchTarget>, path: Option<&str>) {
 }
 
 fn resolve_candidate(candidate: LaunchTarget) -> Option<LaunchTarget> {
+    if candidate.use_shell {
+        return Some(candidate);
+    }
     if candidate.path.exists() {
         return Some(candidate);
     }
@@ -383,13 +393,21 @@ fn start_menu_candidates(app: &AppConfig, process_name: &str) -> Vec<LaunchTarge
     ]);
 
     for root in start_menu_roots() {
-        collect_shortcuts(&root, &targets, &mut candidates);
+        collect_shortcuts(&root, &targets, &mut candidates, 0);
     }
 
     candidates
 }
 
-fn collect_shortcuts(root: &Path, targets: &[String], candidates: &mut Vec<LaunchTarget>) {
+fn collect_shortcuts(
+    root: &Path,
+    targets: &[String],
+    candidates: &mut Vec<LaunchTarget>,
+    depth: usize,
+) {
+    if depth >= 6 || candidates.len() >= 64 {
+        return;
+    }
     let Ok(entries) = fs::read_dir(root) else {
         return;
     };
@@ -397,7 +415,7 @@ fn collect_shortcuts(root: &Path, targets: &[String], candidates: &mut Vec<Launc
     for entry in entries.flatten() {
         let path = entry.path();
         if entry.file_type().map(|item| item.is_dir()).unwrap_or(false) {
-            collect_shortcuts(&path, targets, candidates);
+            collect_shortcuts(&path, targets, candidates, depth + 1);
             continue;
         }
 
@@ -429,7 +447,20 @@ fn collect_shortcuts(root: &Path, targets: &[String], candidates: &mut Vec<Launc
             arguments: Vec::new(),
             use_shell: true,
         });
+        if candidates.len() >= 64 {
+            return;
+        }
     }
+}
+
+fn launch_working_directory(app: &AppConfig, target: &Path) -> Option<PathBuf> {
+    app.working_directory
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .filter(|path| path.is_dir())
+        .or_else(|| target.parent().map(Path::to_path_buf))
 }
 
 fn common_install_roots() -> Vec<PathBuf> {
@@ -523,6 +554,13 @@ fn has_path_separator(path: &Path) -> bool {
 }
 
 fn is_shell_item(path: &str) -> bool {
+    if path
+        .trim()
+        .to_ascii_lowercase()
+        .starts_with("shell:appsfolder\\")
+    {
+        return true;
+    }
     let ext = Path::new(path)
         .extension()
         .map(|ext| ext.to_string_lossy().to_ascii_lowercase())
@@ -597,7 +635,6 @@ mod tests {
             launch_delay_seconds: 0,
             detection_timeout_seconds: 1,
             retry_interval_ms: 100,
-            launch_if_missing: true,
             move_if_running: true,
             force_resize: true,
             apply_to_all_matching_windows: false,
@@ -660,5 +697,32 @@ mod tests {
                 .to_ascii_lowercase()
                 .contains("githubdesktop")
         }));
+    }
+
+    #[test]
+    fn store_app_candidates_use_package_family_shell_identity() {
+        let mut codex = app("Codex", "Codex.exe");
+        codex.executable_path = Some(
+            r"C:\Program Files\WindowsApps\OpenAI.Codex_26.623.5546.0_x64__2p2nqsd0c76g0\app\Codex.exe"
+                .into(),
+        );
+
+        let candidates = launch_candidates(&codex, None);
+        assert!(candidates.iter().any(|candidate| {
+            candidate.use_shell
+                && candidate.path.to_string_lossy()
+                    == r"shell:AppsFolder\OpenAI.Codex_2p2nqsd0c76g0!App"
+        }));
+    }
+
+    #[test]
+    fn invalid_working_directory_falls_back_to_executable_parent() {
+        let mut app = app("Editor", "Editor.exe");
+        app.working_directory = Some(r"Z:\missing\folder".into());
+
+        assert_eq!(
+            launch_working_directory(&app, Path::new(r"C:\Apps\Editor\Editor.exe")),
+            Some(PathBuf::from(r"C:\Apps\Editor"))
+        );
     }
 }

@@ -33,21 +33,7 @@ pub fn monitor_for_rect(rect: RECT) -> Option<MonitorInfo> {
         return None;
     }
 
-    list_monitors().ok().and_then(|monitors| {
-        monitors
-            .into_iter()
-            .find(|monitor| monitor_matches_handle(monitor, handle))
-    })
-}
-
-fn monitor_matches_handle(monitor: &MonitorInfo, handle: HMONITOR) -> bool {
-    let mut info = MONITORINFOEXW::default();
-    info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
-    let ok = unsafe { GetMonitorInfoW(handle, &mut info as *mut MONITORINFOEXW as *mut _) };
-    if !ok.as_bool() {
-        return false;
-    }
-    monitor.device_name == wide_to_string(&info.szDevice)
+    monitor_info(handle)
 }
 
 unsafe extern "system" fn enum_monitor_proc(

@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.1.23
+
+- Serialized restore requests so startup, tray, dashboard, and event-lock restores cannot move the same windows at the same time.
+- Reported restores paused by a foreground game as paused instead of success, and kept the event guard ready to retry after the game exits.
+- Preserved maximized state when capturing layouts and constrained oversized saved bounds after monitor resolution changes.
+- Made nearest-monitor fallback compare the saved profile canvas against every connected display.
+- Added safe config import parsing, schema normalization, duplicate-ID repair, regex validation, and bounds for imported delays and rectangles.
+- Made a second launch bring the existing tray app forward and made the close-button setting exit cleanly when tray hiding is disabled.
+- Removed settings that did not affect runtime behavior and made fullscreen game protection unconditional.
+- Isolated page scrolling inside the app shell, reset scroll position between views, and added an interface recovery screen.
+
+## 0.1.22
+
+- Removed the global hotkey and disabled Tauri raw mouse and keyboard device events, so WindowAutoLayout no longer registers for background input.
+- Replaced the five-second layout-lock poller with a blocking Windows event guard for Show Desktop and game-to-desktop transitions.
+- Prevented automatic and startup restores from forcing window focus or synthesizing keyboard input.
+- Added mid-restore game checks so background work stops if a game or fullscreen app becomes active.
+- Coalesced restore events through one low-priority worker instead of creating a thread for every shell event.
+- Tightened the Tauri content security policy and removed the unused opener plugin.
+- Kept Microsoft Store app profiles working across versioned WindowsApps folder and executable-name changes.
+- Redesigned the dashboard, layout editor, app editor, settings, profiles, and logs around a denser desktop control surface.
+
+## 0.1.21
+
+- Added an event-driven desktop guard that restores already-running profile windows after Show Desktop or after leaving a latency-sensitive game.
+- Kept the guard idle while games such as Valorant are foreground and restored without launching missing apps.
+- Left the installed app running after local installs instead of closing the smoke-launch process.
+- Prevented duplicate tray processes with a named single-instance guard.
+- Accepted BOM-marked config files so a valid config is not replaced with defaults.
+- Kept startup registration pointed at `WindowAutoLayout.exe --startup-restore` so the tray app comes back on Windows login.
+
+## 0.1.20
+
+- Started the app hidden during startup restore so no WindowAutoLayout window is created on-screen before tray mode.
+- Lowered WindowAutoLayout process priority and the layout-lock worker thread priority so the game scheduler wins.
+- Raised layout-lock polling to a 5-30 second range and paused it for 60 seconds while Valorant or another latency-sensitive game is foreground.
+- Treated tray-only OpenLaunchDeck as a clean no-op instead of relaunching it or marking the restore partial.
+- Kept the exact-placement and low-CPU restore fixes from 0.1.19.
+
+## 0.1.19
+
+- Restored normal windows after unmaximizing before the final move, so Windows does not undo the saved bounds.
+- Rechecked restored windows and retried the saved rectangle once if Windows reported drift after the move.
+- Kept stale or off-screen saved layouts on the target monitor while preserving exact saved bounds when they still touch the monitor.
+- Made Capture Current Layout use the window's real monitor, falling back to its center point only when Windows does not report a monitor.
+
 ## 0.1.18
 
 - Cut layout lock CPU use by only running full restore work when managed windows actually change.

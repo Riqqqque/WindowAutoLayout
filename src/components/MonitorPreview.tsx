@@ -70,7 +70,7 @@ export function MonitorPreview({
     <div
       ref={ref}
       className={clsx(
-        "relative aspect-video min-h-[280px] overflow-hidden rounded-md border border-[#34404d] bg-[#0d1117]",
+        "relative aspect-video min-h-[300px] overflow-hidden rounded-md border border-[#3a4854] bg-[#090e12]",
         showGrid && "monitor-grid",
       )}
       onPointerMove={(event) => {
@@ -82,7 +82,7 @@ export function MonitorPreview({
       onPointerUp={() => setDrag(null)}
       onPointerLeave={() => setDrag(null)}
     >
-      <div className="absolute left-3 top-3 rounded-md border border-[#34404d] bg-[#0b0d10]/85 px-2 py-1 text-xs text-zinc-300">
+      <div className="absolute bottom-3 left-3 z-30 rounded border border-[#34424d] bg-[#0b1014] px-2 py-1 text-xs text-[#a6b3bb]">
         {monitor ? `${monitor.width} x ${monitor.height}` : "Preview"}
       </div>
 
@@ -99,10 +99,10 @@ export function MonitorPreview({
           <div
             key={app.id}
             className={clsx(
-              "absolute min-h-8 min-w-12 cursor-move overflow-hidden rounded-md border text-xs shadow-lg transition",
+              "absolute min-h-8 min-w-12 cursor-move overflow-hidden rounded border text-xs transition",
               selected
-                ? "border-[#5db7ff] bg-[#182a3a] text-[#d7edff]"
-                : "border-[#566273] bg-[#18202a]/90 text-zinc-200",
+                ? "border-[#43c7e7] bg-[#15303a] text-[#e1f8fb]"
+                : "border-[#566873] bg-[#192229] text-zinc-200",
             )}
             style={{
               left: `${left}%`,
@@ -127,7 +127,7 @@ export function MonitorPreview({
             }}
             title={`${app.displayName}: ${app.layout.x}, ${app.layout.y} - ${app.layout.width} x ${app.layout.height}`}
           >
-            <div className="pointer-events-none absolute left-1 top-1 max-w-[calc(100%-0.5rem)] rounded border border-[#0b0d10]/50 bg-[#0b0d10]/80 px-1.5 py-1 shadow-sm">
+            <div className="pointer-events-none absolute left-1 top-1 max-w-[calc(100%-0.5rem)] rounded border border-[#0b1014] bg-[#0b1014] px-1.5 py-1">
               <div className="truncate text-[11px] font-semibold leading-4">{app.displayName}</div>
               {showGeometry && (
                 <div className="mt-0.5 truncate text-[10px] leading-3 text-zinc-300">
@@ -138,7 +138,7 @@ export function MonitorPreview({
             <button
               aria-label={`Resize ${app.displayName}`}
               title={`Resize ${app.displayName}`}
-              className="absolute bottom-1 right-1 h-4 w-4 rounded-sm border border-[#5db7ff]/80 bg-[#5db7ff]/20"
+              className="absolute bottom-1 right-1 h-4 w-4 rounded-sm border border-[#43c7e7]/80 bg-[#43c7e7]/20"
               onPointerDown={(event) => {
                 event.preventDefault();
                 event.stopPropagation();

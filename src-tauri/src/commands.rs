@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::PathBuf, process::Command};
 
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::{
     config,
@@ -26,21 +26,27 @@ pub fn get_config(state: State<'_, AppState>) -> AppResult<WindowAutoLayoutConfi
 }
 
 #[tauri::command]
+pub fn parse_config_json(raw: String) -> AppResult<WindowAutoLayoutConfig> {
+    config::parse_json(&raw)
+}
+
+#[tauri::command]
 pub fn save_config(
     app: AppHandle,
     state: State<'_, AppState>,
     mut next_config: WindowAutoLayoutConfig,
 ) -> AppResult<WindowAutoLayoutConfig> {
-    next_config.schema_version = crate::models::CONFIG_SCHEMA_VERSION;
-    next_config.app_version = crate::models::APP_VERSION.to_string();
-    next_config.startup.launch_missing_apps = true;
-    for profile in &mut next_config.profiles {
-        for app in &mut profile.apps {
-            app.launch_if_missing = true;
-        }
-    }
-    startup::set_startup_enabled(next_config.startup.enabled)?;
+    config::normalize_config(&mut next_config);
+    let previous_config = state
+        .config
+        .lock()
+        .map_err(|_| AppError::Config("Config lock was poisoned".to_string()))?
+        .clone();
     config::save(&state.config_dir, &next_config)?;
+    if let Err(error) = startup::set_startup_enabled(next_config.startup.enabled) {
+        let _ = config::save(&state.config_dir, &previous_config);
+        return Err(error);
+    }
     *state
         .config
         .lock()
@@ -100,33 +106,6 @@ pub async fn restore_profile(
     })
     .await
     .map_err(|error| AppError::Config(format!("Restore task failed: {error}")))?
-}
-
-#[tauri::command]
-pub async fn lock_layout_temporarily(
-    state: State<'_, AppState>,
-    profile_id: Option<String>,
-    duration_seconds: u64,
-) -> AppResult<RestoreResult> {
-    let config_dir = state.config_dir.clone();
-    let config = state
-        .config
-        .lock()
-        .map_err(|_| AppError::Config("Config lock was poisoned".to_string()))?
-        .clone();
-    let interval_ms = config.enforcement.interval_ms;
-
-    tauri::async_runtime::spawn_blocking(move || {
-        profiles::enforce_profile_for(
-            &config_dir,
-            &config,
-            profile_id,
-            duration_seconds,
-            interval_ms,
-        )
-    })
-    .await
-    .map_err(|error| AppError::Config(format!("Lock task failed: {error}")))?
 }
 
 #[tauri::command]
@@ -408,11 +387,14 @@ fn captured_apps_for_windows(monitor: &MonitorInfo, windows: &[WindowInfo]) -> V
                         bottom: window.y + window.height,
                     },
                 ),
-                window_state: WindowStatePreference::Normal,
+                window_state: if window.is_maximized {
+                    WindowStatePreference::Maximized
+                } else {
+                    WindowStatePreference::Normal
+                },
                 launch_delay_seconds: 0,
                 detection_timeout_seconds: 25,
                 retry_interval_ms: 700,
-                launch_if_missing: true,
                 move_if_running: true,
                 force_resize: true,
                 apply_to_all_matching_windows: false,
@@ -439,20 +421,19 @@ fn window_matches_capture_monitor(window: &WindowInfo, monitor: &MonitorInfo) ->
         .monitor_id
         .as_ref()
         .map(|id| id == &monitor.id)
-        .unwrap_or(false)
-        || window_intersects_monitor(window, monitor)
+        .unwrap_or_else(|| window_center_is_on_monitor(window, monitor))
 }
 
-fn window_intersects_monitor(window: &WindowInfo, monitor: &MonitorInfo) -> bool {
-    let window_right = window.x + window.width;
-    let window_bottom = window.y + window.height;
+fn window_center_is_on_monitor(window: &WindowInfo, monitor: &MonitorInfo) -> bool {
+    let center_x = window.x + window.width / 2;
+    let center_y = window.y + window.height / 2;
     let monitor_right = monitor.x + monitor.width;
     let monitor_bottom = monitor.y + monitor.height;
 
-    window.x < monitor_right
-        && window_right > monitor.x
-        && window.y < monitor_bottom
-        && window_bottom > monitor.y
+    center_x >= monitor.x
+        && center_x < monitor_right
+        && center_y >= monitor.y
+        && center_y < monitor_bottom
 }
 
 fn is_self_window(window: &WindowInfo) -> bool {
@@ -613,17 +594,7 @@ pub fn open_log_file(state: State<'_, AppState>) -> AppResult<()> {
 
 #[tauri::command]
 pub fn show_main_window(app: AppHandle) -> AppResult<()> {
-    if let Some(window) = app.get_webview_window("main") {
-        window
-            .show()
-            .map_err(|error| AppError::Config(error.to_string()))?;
-        window
-            .unminimize()
-            .map_err(|error| AppError::Config(error.to_string()))?;
-        window
-            .set_focus()
-            .map_err(|error| AppError::Config(error.to_string()))?;
-    }
+    crate::show_main_window(&app);
     Ok(())
 }
 
@@ -680,6 +651,7 @@ mod tests {
             height,
             is_visible: true,
             is_minimized: false,
+            is_maximized: false,
         }
     }
 
@@ -705,6 +677,26 @@ mod tests {
 
         let other_monitor = window("Discord.exe", "Discord", "display-1", 100, 100, 700, 600);
         assert!(!capture_window_candidate(&other_monitor, &target));
+    }
+
+    #[test]
+    fn capture_uses_monitor_id_before_overlap() {
+        let target = monitor("display-2", -1920, 0, 1920, 1080);
+        let barely_overlapping = window("Chat.exe", "Chat", "display-1", -10, 100, 600, 500);
+
+        assert!(!capture_window_candidate(&barely_overlapping, &target));
+    }
+
+    #[test]
+    fn capture_uses_window_center_when_monitor_id_is_missing() {
+        let target = monitor("display-2", -1920, 0, 1920, 1080);
+        let mut centered = window("Chat.exe", "Chat", "display-unknown", -1000, 100, 600, 500);
+        centered.monitor_id = None;
+        assert!(capture_window_candidate(&centered, &target));
+
+        let mut off_target = window("Chat.exe", "Chat", "display-unknown", 100, 100, 600, 500);
+        off_target.monitor_id = None;
+        assert!(!capture_window_candidate(&off_target, &target));
     }
 
     #[test]
@@ -741,5 +733,16 @@ mod tests {
         assert!(matches!(&obs_rule.mode, TitleMatchMode::StartsWith));
         assert_eq!(obs_rule.value, "OBS");
         assert_eq!(apps[2].display_name, "OBS Studio");
+    }
+
+    #[test]
+    fn capture_preserves_maximized_window_state() {
+        let target = monitor("display-1", 0, 0, 1920, 1080);
+        let mut maximized = window("Editor.exe", "Editor", "display-1", 0, 0, 1920, 1080);
+        maximized.is_maximized = true;
+
+        let apps = captured_apps_for_windows(&target, &[maximized]);
+
+        assert_eq!(apps[0].window_state, WindowStatePreference::Maximized);
     }
 }

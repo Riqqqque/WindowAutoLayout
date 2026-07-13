@@ -18,7 +18,7 @@ Update these together for every release:
 The tag must match the package version:
 
 ```text
-package.json version 0.1.18 -> tag v0.1.18
+package.json version 0.1.23 -> tag v0.1.23
 ```
 
 ## Local Finish Pass
@@ -68,17 +68,27 @@ Minimum OBS release check:
 
 ## Publish
 
+Before creating a public tag:
+
+- replace the pending `LICENSE` text with the final distribution terms
+- configure Authenticode signing for both Windows installers
+- verify the signing certificate and timestamp service in CI
+- add a signed update channel before advertising automatic updates
+
+The workflow intentionally rejects release tags while `LICENSE` still contains the pending no-redistribution text. Do not publish unsigned installers as a production release.
+
 Commit the release changes, then push main and the version tag:
 
 ```powershell
 git push origin main
-git tag v0.1.18
-git push origin v0.1.18
+git tag v0.1.23
+git push origin v0.1.23
 ```
 
 The GitHub workflow:
 
 - validates the tag matches `package.json`
+- blocks distribution while the repository license is still pending
 - runs TypeScript checks
 - runs the frontend dependency audit
 - runs Rust format, check, test, and clippy passes
@@ -101,7 +111,7 @@ WindowAutoLayout_<version>_x64_en-US.msi.sha256
 Verify the published release:
 
 ```powershell
-gh release view v0.1.18 --repo Riqqqque/WindowAutoLayout --json url,tagName,name,isDraft,isPrerelease,assets
+gh release view v0.1.23 --repo Riqqqque/WindowAutoLayout --json url,tagName,name,isDraft,isPrerelease,assets
 ```
 
 ## Troubleshooting Release Builds

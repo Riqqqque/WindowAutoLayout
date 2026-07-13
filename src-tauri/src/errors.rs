@@ -21,6 +21,8 @@ pub enum AppError {
     InvalidWindowHandle(String),
     #[error("Invalid executable path: {0}")]
     InvalidExecutablePath(String),
+    #[error("A layout restore is already in progress")]
+    RestoreInProgress,
 }
 
 impl Serialize for AppError {

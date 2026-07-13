@@ -8,7 +8,9 @@ Use these checks for release smoke testing on Windows 11. For restore behavior, 
 - Confirm the installed exe exists under `%LOCALAPPDATA%\WindowAutoLayout`.
 - Confirm the installed file version matches the release version.
 - Start the installed app once and confirm it stays alive.
+- Start the installed app again and confirm the existing window opens without creating a second process.
 - Close the visible window and confirm the tray icon remains when close-to-tray is enabled.
+- Disable close-to-tray, close the window, and confirm the process exits instead of becoming unreachable.
 
 ## Monitor And Window Detection
 
@@ -29,7 +31,9 @@ Use these checks for release smoke testing on Windows 11. For restore behavior, 
 - Move both windows away from their saved positions.
 - Restore the profile from Dashboard.
 - Minimize one window and restore again.
-- Maximize one window, save the layout, and restore again.
+- Maximize one window, capture it, and confirm its saved window state remains maximized after restore.
+- Change monitor resolution and confirm oversized saved bounds are constrained to the current display.
+- With three displays connected, confirm nearest fallback chooses the display closest to the saved profile size.
 - Enable `Move all matching windows` for a browser and verify multiple matching windows move when intended.
 - Check Logs for applied layout counts.
 
@@ -57,7 +61,7 @@ This is the important streaming test.
 - Confirm app launch failures appear in Logs.
 - Confirm running tray apps are woken before a duplicate launch is attempted.
 
-## Startup, Tray, And Hotkey
+## Startup, Tray, And Input Safety
 
 - Enable startup restore and confirm the HKCU Run entry is created.
 - Confirm the Run entry includes `--startup-restore`.
@@ -66,17 +70,28 @@ This is the important streaming test.
 - Confirm the default startup profile restores.
 - Close the main window and confirm it hides to tray.
 - Restore from the tray menu.
-- Press `Ctrl+Alt+L` and confirm the selected/default profile restores.
-- Disable the hotkey and confirm it no longer triggers.
+- Confirm `Ctrl+Alt+L` is not reserved by WindowAutoLayout.
+- Confirm the installed process stays at Below normal priority.
+- Confirm there is only one WindowAutoLayout tray process.
 
 ## Layout Lock
 
 - Enable layout lock for the streaming profile.
-- Move a target window during the lock and confirm it snaps back.
 - Press Show Desktop and confirm the profile is restored while lock is active.
-- Minimize OBS during the lock and confirm it is pulled back when OBS settings allow it.
-- Confirm the lock stops after its duration or when disabled manually.
-- Watch CPU usage briefly and confirm the lock is not causing heavy idle load.
+- Leave a fullscreen app and confirm the profile is restored after returning to the desktop.
+- Return to the fullscreen app immediately and confirm the pending restore is cancelled.
+- Confirm a closed profile app is not launched by an automatic event restore.
+- Confirm disabling the lock stops event restores.
+- Sample idle CPU and confirm there is no recurring five-second activity.
+- Trigger restore twice quickly and confirm only one restore runs.
+- Start a restore while a fullscreen game is foreground and confirm the result says Paused rather than Success.
+
+## Config Import
+
+- Import a valid exported config and confirm it remains editable before saving.
+- Import malformed JSON and confirm the current config stays unchanged.
+- Import duplicate or empty profile/app IDs and confirm they are repaired without losing entries.
+- Import extreme delay and rectangle values and confirm they are constrained to safe bounds.
 
 ## Failure Cases
 

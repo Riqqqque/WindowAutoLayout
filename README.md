@@ -22,7 +22,7 @@
 
 Streaming and gaming setups usually need the same windows in the same places: OBS on one side, Discord on another, a browser where chat or dashboards live, and everything ready after a reboot. Windows can remember some things, but tray apps, delayed startup windows, monitor offsets, and Show Desktop can still scramble a setup.
 
-WindowAutoLayout saves workspace profiles and restores them from the app, tray menu, startup, or a hotkey. It is built for the everyday Windows workflow where pressing one button should bring the setup back, whether the apps are already open, minimized, hidden in the tray, or fully closed.
+WindowAutoLayout saves workspace profiles and restores them from the app, tray menu, or Windows startup. It is built for the everyday Windows workflow where pressing one button should bring the setup back, whether the apps are already open, minimized, hidden in the tray, or fully closed.
 
 ## What It Does
 
@@ -32,8 +32,10 @@ WindowAutoLayout saves workspace profiles and restores them from the app, tray m
 - Restores a profile by launching missing apps, waiting for real matching windows, then moving and resizing them with Win32 APIs.
 - Pulls minimized and hidden tray windows forward before treating an app as missing.
 - Handles OBS in the tray by asking OBS through its tray icon path, then waiting for the real OBS window to repaint before applying the saved layout.
-- Keeps a selected profile locked while the lock is on, so Show Desktop, accidental minimize, and accidental moves get snapped back.
-- Supports editable app presets, multiple profiles, startup restore, tray restore, logs, JSON import/export, and a global hotkey.
+- Keeps a selected profile protected with an event-driven lock that reacts to Show Desktop and game-to-desktop transitions without a polling loop.
+- Reopens the existing tray instance when WindowAutoLayout is launched a second time instead of creating a duplicate process.
+- Does not install global mouse hooks, keyboard hooks, raw-input listeners, or system-wide hotkeys.
+- Supports editable app presets, multiple profiles, startup restore, tray restore, logs, and JSON import/export.
 - Stores config and logs locally. No telemetry, accounts, analytics, or background network calls.
 
 ## Download
@@ -58,7 +60,7 @@ After install, WindowAutoLayout lives under the current Windows user profile and
 4. Open and arrange the apps you want in the profile.
 5. On Dashboard, pick the capture monitor and press Capture current layout.
 6. Fine-tune app matching on Apps or individual windows on Layout if needed.
-7. Press Restore from Dashboard, the tray menu, startup restore, or `Ctrl+Alt+L`.
+7. Press Restore from Dashboard, the tray menu, or startup restore.
 
 For a complete setup walkthrough, see [docs/usage.md](docs/usage.md).
 
@@ -75,7 +77,11 @@ More details and recovery checks are in [docs/troubleshooting.md](docs/troublesh
 
 ## Layout Lock
 
-The lock button watches the selected profile and only runs a full restore when one of its managed windows changes position, visibility, minimized state, or disappears. It is meant for live setups where the layout should recover after Show Desktop, accidental minimize, dragging, or another app stealing placement without burning CPU while everything is already stable. The lock interval is clamped to a low-impact range, and fullscreen non-profile apps get a longer pause so games are not polled hard.
+The lock button arms a Windows shell-event guard for the selected profile. It restores after Show Desktop and after leaving a game or fullscreen app, but it does not run a timer or repeatedly inspect every window. Background restores never launch missing apps, never force focus, and stop immediately if a game or fullscreen app becomes active again.
+
+## Game And Input Safety
+
+WindowAutoLayout does not register global hotkeys or low-level mouse/keyboard hooks. Tauri's optional raw device-event stream is explicitly disabled, automatic restores run below normal process priority, and the background guard waits on Windows accessibility events instead of polling. Window movement uses normal Win32 window-management calls and does not synthesize keyboard or mouse input.
 
 ## Startup Restore
 
@@ -168,9 +174,9 @@ scripts/              Local install/update helper
 Every version tag matching `v*` builds the Windows bundles and publishes installer assets to GitHub Releases.
 
 ```powershell
-git tag v0.1.18
+git tag v0.1.23
 git push origin main
-git push origin v0.1.18
+git push origin v0.1.23
 ```
 
 The workflow validates that the tag matches `package.json`, runs TypeScript, frontend audit, and Rust checks, builds the Tauri bundle, generates checksums, uploads CI artifacts, and publishes the release.

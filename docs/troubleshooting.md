@@ -103,20 +103,17 @@ Fix:
 
 ## Show Desktop Still Hides Windows
 
-The Windows Show Desktop command can minimize windows. Layout lock is the recovery mechanism.
+The Windows Show Desktop command can minimize windows. Event lock is the recovery mechanism.
 
-Turn on layout lock for the profile. While the lock is active, WindowAutoLayout watches the managed windows and restores the profile when one moves, minimizes, hides, or disappears.
+Turn on layout lock for the profile and leave WindowAutoLayout running in the tray. The lock listens for the desktop reveal and restores already-running profile windows without launching apps or taking focus.
 
-## Hotkey Does Nothing
+## Game Or Input Feels Affected
 
-Check:
+WindowAutoLayout does not register a global hotkey, raw mouse/keyboard device events, or low-level input hooks. The layout lock is event-driven and has no recurring scan interval.
 
-- hotkey is enabled in Settings
-- the accelerator is valid
-- another app is not already using the same hotkey
-- WindowAutoLayout is still running in the tray
+Check Task Manager for exactly one `WindowAutoLayout.exe` process. Its priority should be Below normal, and CPU should stay at or near zero while idle. Disable layout lock temporarily to separate a shell-triggered restore from unrelated game behavior.
 
-Try changing the hotkey, saving, then changing it back.
+Automatic restore is skipped whenever a known game or any fullscreen foreground window is active. If a restore was already waiting to run, returning to the game cancels it.
 
 ## Startup Restore Does Not Run
 

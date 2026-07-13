@@ -8,12 +8,12 @@ import {
   RefreshCw,
   Save,
   Settings,
+  ShieldCheck,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { register, unregisterAll } from "@tauri-apps/plugin-global-shortcut";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { clsx } from "clsx";
-import { api, isTauriRuntime } from "./lib/api";
-import { activeProfile, patchProfile, resolveProfileMonitor } from "./lib/helpers";
+import { api } from "./lib/api";
+import { activeProfile, patchProfile, resolveProfileMonitor, statusText } from "./lib/helpers";
 import type {
   AppConfig,
   LogEntry,
@@ -60,6 +60,7 @@ export default function App() {
   const [message, setMessage] = useState<string | null>(null);
   const [layoutLocked, setLayoutLocked] = useState(false);
   const [captureMonitorId, setCaptureMonitorId] = useState<string | null>(null);
+  const workspaceContentRef = useRef<HTMLDivElement>(null);
 
   const profile = useMemo(() => (config ? activeProfile(config, selectedProfileId) : null), [config, selectedProfileId]);
   const effectiveCaptureMonitorId = useMemo(() => {
@@ -92,8 +93,11 @@ export default function App() {
     setLogPath(nextLogPath);
     setValidation(nextValidation);
     setLayoutLocked(nextLayoutLocked);
-    setSelectedProfileId((current) => current ?? nextConfig.startup.defaultProfileId ?? nextConfig.profiles[0]?.id ?? null);
-    setSelectedAppId((current) => current ?? nextConfig.profiles[0]?.apps[0]?.id ?? null);
+    setSelectedProfileId((current) =>
+      current && nextConfig.profiles.some((item) => item.id === current)
+        ? current
+        : nextConfig.startup.defaultProfileId ?? nextConfig.profiles[0]?.id ?? null,
+    );
     setCaptureMonitorId((current) => {
       if (current && nextMonitors.some((monitor) => monitor.id === current)) return current;
       const nextProfile = activeProfile(nextConfig, nextConfig.startup.defaultProfileId ?? nextConfig.profiles[0]?.id ?? null);
@@ -106,6 +110,21 @@ export default function App() {
     refresh().catch((error) => setMessage(String(error)));
   }, [refresh]);
 
+  useEffect(() => {
+    if (!profile) return;
+    setSelectedProfileId((current) => (current === profile.id ? current : profile.id));
+    setSelectedAppId((current) =>
+      current && profile.apps.some((app) => app.id === current)
+        ? current
+        : profile.apps[0]?.id ?? null,
+    );
+  }, [profile]);
+
+  useEffect(() => {
+    workspaceContentRef.current?.scrollTo({ top: 0, left: 0 });
+    window.scrollTo({ top: 0, left: 0 });
+  }, [page]);
+
   const restoreSelected = useCallback(async () => {
     if (!config || !profile) return;
     setBusy(true);
@@ -116,35 +135,13 @@ export default function App() {
       const result = await api.restoreProfile(profile.id, true);
       setLastRestore(result);
       setLogs(await api.logs());
-      setMessage(`Restore finished: ${result.status}`);
+      setMessage(`Restore finished: ${statusText(result.status)}`);
     } catch (error) {
       setMessage(String(error));
     } finally {
       setBusy(false);
     }
   }, [config, dirty, profile]);
-
-  useEffect(() => {
-    if (!config?.hotkey.enabled || !config.hotkey.accelerator.trim()) {
-      if (isTauriRuntime) {
-        unregisterAll().catch(() => undefined);
-      }
-      return;
-    }
-
-    if (!isTauriRuntime) {
-      return;
-    }
-
-    const accelerator = normalizeAccelerator(config.hotkey.accelerator);
-    unregisterAll()
-      .then(() => register(accelerator, () => restoreSelected()))
-      .catch((error) => setMessage(`Hotkey registration failed: ${String(error)}`));
-
-    return () => {
-      unregisterAll().catch(() => undefined);
-    };
-  }, [config?.hotkey.enabled, config?.hotkey.accelerator, restoreSelected]);
 
   function updateConfig(next: WindowAutoLayoutConfig) {
     setConfig(next);
@@ -189,7 +186,16 @@ export default function App() {
       const saved = dirty ? await api.saveConfig(config) : config;
       setConfig(saved);
       setDirty(false);
-      const enabled = await api.setLayoutLock(!layoutLocked, profile.id);
+      const enabling = !layoutLocked;
+      if (enabling) {
+        const result = await api.restoreProfile(profile.id, true);
+        setLastRestore(result);
+        if (["paused", "failed", "monitorMissing"].includes(result.status)) {
+          setMessage(`Layout lock not enabled: ${statusText(result.status)}`);
+          return;
+        }
+      }
+      const enabled = await api.setLayoutLock(enabling, profile.id);
       setConfig({ ...saved, enforcement: { ...saved.enforcement, enabled, profileId: profile.id } });
       setLayoutLocked(enabled);
       setLogs(await api.logs());
@@ -250,11 +256,22 @@ export default function App() {
     setValidation(nextValidation);
   }
 
+  function refreshFromUi() {
+    if (dirty) {
+      setMessage("Save your changes before refreshing");
+      return;
+    }
+    setBusy(true);
+    refresh()
+      .catch((error) => setMessage(String(error)))
+      .finally(() => setBusy(false));
+  }
+
   if (!config || !profile) {
     return (
       <main className="app-frame flex min-h-screen items-center justify-center text-zinc-200">
-        <div className="surface flex items-center gap-3 rounded-md px-4 py-3">
-          <RefreshCw className="animate-spin text-[#5db7ff]" size={18} />
+        <div className="panel flex items-center gap-3 px-4 py-3">
+          <RefreshCw className="animate-spin text-[#43c7e7]" size={18} />
           <span className="text-sm font-medium">Loading WindowAutoLayout</span>
         </div>
       </main>
@@ -263,63 +280,64 @@ export default function App() {
 
   return (
     <main className="app-frame min-h-screen text-zinc-100">
-      <div className="grid min-h-screen lg:grid-cols-[264px_1fr]">
-        <aside className="border-b border-[#252b34] bg-[#0c0f13]/95 p-3 lg:border-b-0 lg:border-r">
-          <div className="flex min-h-14 items-center gap-3 px-2">
-            <div className="flex h-10 w-10 items-center justify-center rounded-md border border-[#5db7ff]/35 bg-[#5db7ff]/12 text-[#b8ddff]">
+      <div className="app-shell">
+        <aside className="sidebar">
+          <div className="brand">
+            <div className="brand-mark">
               <PanelsTopLeft size={18} />
             </div>
             <div className="min-w-0">
-              <div className="font-semibold text-zinc-50">WindowAutoLayout</div>
-              <div className="text-xs text-[#8a94a3]">v{config.appVersion}</div>
+              <div className="truncate text-sm font-semibold text-zinc-50">WindowAutoLayout</div>
+              <div className="text-xs text-[#71818c]">v{config.appVersion}</div>
             </div>
           </div>
 
-          <div className="mt-3 rounded-md border border-[#252b34] bg-[#111418] px-3 py-2">
-            <div className="text-[11px] font-semibold uppercase tracking-normal text-[#8a94a3]">Active profile</div>
+          <div className="sidebar-context">
+            <div className="eyebrow">Active profile</div>
             <div className="mt-1 truncate text-sm font-medium text-zinc-100">{profile.name}</div>
-            <div className="mt-2 flex items-center gap-2 text-xs text-[#8a94a3]">
-              <span className={`h-2 w-2 rounded-full ${layoutLocked ? "bg-[#39d98a]" : "bg-[#485363]"}`} />
-              {layoutLocked ? "Layout locked" : "Lock off"}
+            <div className="mt-2 flex items-center gap-2 text-xs text-[#8fa0aa]">
+              <span className={`h-2 w-2 rounded-full ${layoutLocked ? "bg-[#42d392]" : "bg-[#50606b]"}`} />
+              {layoutLocked ? "Event lock active" : "Event lock off"}
             </div>
           </div>
 
-          <nav className="mt-4 grid gap-1">
+          <nav className="sidebar-nav">
             {navItems.map((item) => {
               const Icon = item.icon;
               return (
                 <button
                   key={item.id}
                   className={clsx(
-                    "group flex h-10 items-center gap-3 rounded-md border px-3 text-sm transition",
-                    page === item.id
-                      ? "border-[#5db7ff]/35 bg-[#182434] text-zinc-50"
-                      : "border-transparent text-[#9aa5b3] hover:border-[#252b34] hover:bg-[#121820] hover:text-zinc-100",
+                    "nav-item group text-sm",
+                    page === item.id && "nav-item-active",
                   )}
+                  aria-current={page === item.id ? "page" : undefined}
                   onClick={() => setPage(item.id)}
                 >
-                  <Icon size={16} className={page === item.id ? "text-[#5db7ff]" : "text-[#697586] group-hover:text-zinc-300"} />
+                  <Icon size={16} className={page === item.id ? "text-[#43c7e7]" : "text-[#73838f] group-hover:text-zinc-300"} />
                   {item.label}
                 </button>
               );
             })}
           </nav>
+          <div className="sidebar-footer">
+            <ShieldCheck size={15} className="text-[#42d392]" />
+            <span>No input hooks</span>
+          </div>
         </aside>
 
-        <section className="min-w-0">
-          <header className="sticky top-0 z-30 flex min-h-16 items-center justify-between gap-3 border-b border-[#252b34] bg-[#0b0d10]/90 px-4 backdrop-blur">
+        <section className="workspace">
+          <header className="topbar">
             <div className="min-w-0">
-              <div className="truncate text-sm font-medium text-zinc-100">{message ?? (dirty ? "Unsaved changes" : "Ready")}</div>
-              <div className="mt-0.5 flex items-center gap-2 text-xs text-[#8a94a3]">
-                <span>{config.profiles.length} profiles</span>
-                <span aria-hidden="true">/</span>
-                <span>{profile.apps.length} apps in {profile.name}</span>
+              <div className="truncate text-[15px] font-semibold text-zinc-100">{navItems.find((item) => item.id === page)?.label}</div>
+              <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-[#82919c]">
+                <span>{message ?? (dirty ? "Unsaved changes" : `${profile.apps.length} apps in ${profile.name}`)}</span>
                 {layoutLocked && (
                   <>
                     <span aria-hidden="true">/</span>
-                    <span className="inline-flex items-center gap-1 text-[#a8f3cf]">
+                    <span className="inline-flex items-center gap-1 text-[#aef2d1]">
                       <LockKeyhole size={12} />
-                      locked
+                      event lock
                     </span>
                   </>
                 )}
@@ -327,14 +345,15 @@ export default function App() {
             </div>
             <div className="flex gap-2">
               <button
-                className="inline-flex h-9 items-center gap-2 rounded-md border border-[#2a323d] bg-[#111820] px-3 text-sm text-zinc-200 transition hover:border-[#455364] hover:bg-[#17202a]"
-                onClick={() => refresh().catch((error) => setMessage(String(error)))}
+                className="button-secondary"
+                onClick={refreshFromUi}
+                disabled={busy}
               >
                 <RefreshCw size={15} />
                 Refresh
               </button>
               <button
-                className="inline-flex h-9 items-center gap-2 rounded-md border border-[#5db7ff]/60 bg-[#5db7ff] px-3 text-sm font-semibold text-[#071019] transition hover:bg-[#86caff] disabled:cursor-not-allowed disabled:opacity-40"
+                className="button-primary"
                 onClick={saveConfig}
                 disabled={busy || !dirty}
               >
@@ -344,14 +363,14 @@ export default function App() {
             </div>
           </header>
 
-          <div className="p-4">
+          <div ref={workspaceContentRef} className="workspace-content">
             {page === "dashboard" && (
               <Dashboard
                 config={config}
                 profile={profile}
                 monitors={monitors}
                 windows={windows}
-                lastRestore={lastRestore}
+                lastRestore={lastRestore?.profileId === profile.id ? lastRestore : null}
                 validation={validation}
                 busy={busy}
                 captureMonitorId={effectiveCaptureMonitorId}
@@ -364,7 +383,7 @@ export default function App() {
                 onRestore={restoreSelected}
                 onLockToggle={toggleLayoutLock}
                 layoutLocked={layoutLocked}
-                onRefresh={() => refresh().catch((error) => setMessage(String(error)))}
+                onRefresh={refreshFromUi}
                 onCaptureMonitorChange={setCaptureMonitorId}
                 onCaptureCurrentLayout={captureCurrentLayout}
                 onRemoveApp={removeAppFromProfile}
@@ -435,11 +454,4 @@ export default function App() {
       </div>
     </main>
   );
-}
-
-function normalizeAccelerator(accelerator: string) {
-  return accelerator
-    .replace(/\bCtrl\b/gi, "CommandOrControl")
-    .replace(/\bControl\b/gi, "CommandOrControl")
-    .replace(/\s+/g, "");
 }

@@ -101,16 +101,11 @@ try {
 
     $stayedAlive = $null
     if (-not $NoLaunchSmoke) {
-        $app = Start-Process -FilePath $exe -PassThru -WindowStyle Hidden
+        Get-Process -Name "WindowAutoLayout", "windowautolayout" -ErrorAction SilentlyContinue |
+            Stop-Process -Force -ErrorAction SilentlyContinue
+        $app = Start-Process -FilePath $exe -ArgumentList "--startup-restore" -PassThru -WindowStyle Hidden
         Start-Sleep -Seconds 5
         $stayedAlive = -not $app.HasExited
-        if ($stayedAlive) {
-            $app.CloseMainWindow() | Out-Null
-            Start-Sleep -Seconds 2
-            if (-not $app.HasExited) {
-                Stop-Process -Id $app.Id -Force
-            }
-        }
         if (-not $stayedAlive) {
             throw "Installed app exited during launch smoke"
         }

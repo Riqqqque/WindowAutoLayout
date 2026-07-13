@@ -11,7 +11,7 @@ WindowAutoLayout is built around one idea: save a workspace once, then bring it 
 | Layout | The saved X, Y, width, and height for an app window |
 | Target monitor | The monitor where the saved layout should land |
 | Restore | The action that launches missing apps, finds windows, and moves them |
-| Layout lock | A temporary keep-in-place mode that restores a profile when managed windows change |
+| Layout lock | An event-driven guard that recovers a profile after Show Desktop or leaving a fullscreen app |
 
 ## First Setup
 
@@ -24,7 +24,7 @@ WindowAutoLayout is built around one idea: save a workspace once, then bring it 
 7. Fine-tune any app entry in Apps or any single window in Layout if needed.
 8. Press Restore.
 
-Once that works, enable startup restore or use the tray menu and hotkey.
+Once that works, enable startup restore or use the tray menu.
 
 ## Profiles
 
@@ -97,7 +97,6 @@ Recommended OBS app entry:
 | Pull hidden/tray windows | On |
 | Wake running tray apps | On |
 | Restore if minimized | On |
-| Launch if missing | On |
 | Detection timeout | At least 25 seconds |
 | Retry interval | Around 700 ms |
 
@@ -118,11 +117,11 @@ Discord can take a moment to expose its main Electron window after launch. Keep 
 
 ## Startup Restore
 
-Startup restore is controlled from Settings and Profiles.
+Startup restore is controlled from Settings, with the default profile selected under Profiles.
 
 Settings control whether WindowAutoLayout starts with Windows, whether it starts minimized to tray, how long it waits, and whether it restores on launch.
 
-Profiles control which profile is the default startup profile and whether that profile participates in startup restore.
+Profiles control which profile is the default startup profile.
 
 The startup command is stored in the current user's Run key:
 
@@ -134,26 +133,17 @@ No admin rights are required for normal startup registration.
 
 ## Layout Lock
 
-Layout lock is for keeping a live workspace in place.
+Layout lock is for recovering a workspace from shell actions without continuous background work.
 
-When enabled, WindowAutoLayout watches the selected profile and restores only when a managed window changes. That means:
+When enabled:
 
-- Show Desktop gets corrected while the lock is active.
-- Accidentally dragged windows snap back.
-- Minimized matching windows get pulled back if the app settings allow it.
-- The app keeps watching the selected profile until the lock is disabled or the lock duration ends.
+- Show Desktop triggers a restore of already-running profile windows.
+- Leaving a game or fullscreen app triggers a delayed restore.
+- Returning to a game before restore begins cancels the background restore.
+- Automatic restore never launches a missing app or forces keyboard focus.
+- No window scan runs on a timer while the desktop is idle.
 
-The lock interval is clamped internally to 2-5 seconds. If a fullscreen app that is not part of the profile is foreground, WindowAutoLayout pauses lock work longer so games are not polled hard.
-
-## Hotkey
-
-The default hotkey is:
-
-```text
-Ctrl+Alt+L
-```
-
-When enabled, the hotkey restores the selected/default profile. If restore-without-opening is enabled, the main WindowAutoLayout window does not need to pop open.
+Use the Dashboard Restore button or tray Restore command when missing apps also need to launch.
 
 ## Config And Logs
 
@@ -163,7 +153,7 @@ User config and logs are stored under:
 %APPDATA%\com.rique.windowautolayout
 ```
 
-The config is JSON and can be imported or exported from Settings. If the config becomes unreadable, WindowAutoLayout backs it up and starts from a fresh default config.
+The config is JSON and can be imported or exported from Settings. Imports are parsed and normalized by the Rust backend before the interface uses them. If the config becomes unreadable, WindowAutoLayout backs it up and starts from a fresh default config.
 
 ## Everyday Streaming Flow
 
@@ -174,4 +164,4 @@ The config is JSON and can be imported or exported from Settings. If the config 
 5. Missing apps open.
 6. Tray apps are pulled forward.
 7. The selected streaming profile is restored.
-8. Layout lock keeps the workspace stable if enabled.
+8. Layout lock recovers the workspace after relevant shell events if enabled.

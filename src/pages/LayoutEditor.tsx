@@ -42,7 +42,12 @@ export function LayoutEditorPage({
   const app = profile.apps.find((item) => item.id === selectedAppId) ?? profile.apps[0];
   const monitor =
     (app?.targetMonitorId
-      ? resolveMonitor(monitors, app.targetMonitorId, config.global.monitorMissingBehavior).monitor
+      ? resolveMonitor(
+          monitors,
+          app.targetMonitorId,
+          config.global.monitorMissingBehavior,
+          app.layout,
+        ).monitor
       : resolveProfileMonitor(config, profile, monitors).monitor) ??
     monitors.find((item) => !item.isPrimary) ??
     monitors[0];
@@ -62,30 +67,40 @@ export function LayoutEditorPage({
     onConfigChange(
       patchProfile(config, profile.id, (profile) => ({
         ...profile,
+        targetMonitorId: monitor.id,
         apps: profile.apps.map((app, index) => ({
           ...app,
-          layout: { x: index * width, y: 0, width, height: monitor.height },
+          targetMonitorId: monitor.id,
+          layout: {
+            x: index * width,
+            y: 0,
+            width: index === profile.apps.length - 1 ? monitor.width - index * width : width,
+            height: monitor.height,
+          },
         })),
       })),
     );
   }
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
-      <section className="surface rounded-md p-4">
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_350px]">
+      <section className="panel min-w-0 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-lg font-semibold text-zinc-50">Layout</h1>
+          <div>
+            <h1 className="section-heading">Layout canvas</h1>
+            <div className="mt-1 text-xs text-[#71818c]">{monitor ? `${monitor.name} / ${monitor.width} x ${monitor.height}` : "No display"}</div>
+          </div>
           <div className="flex gap-2">
-            <IconButton label="Fill left half" onClick={() => app && setSelectedRect({ x: 0, y: 0, width: (monitor?.width ?? 1920) / 2, height: monitor?.height ?? 1080 })}>
+            <IconButton label="Fill left half" disabled={!app || !monitor} onClick={() => app && monitor && setSelectedRect({ x: 0, y: 0, width: monitor.width / 2, height: monitor.height })}>
               <Columns2 size={16} />
             </IconButton>
-            <IconButton label="Fill top half" onClick={() => app && setSelectedRect({ x: 0, y: 0, width: monitor?.width ?? 1920, height: (monitor?.height ?? 1080) / 2 })}>
+            <IconButton label="Fill top half" disabled={!app || !monitor} onClick={() => app && monitor && setSelectedRect({ x: 0, y: 0, width: monitor.width, height: monitor.height / 2 })}>
               <Rows2 size={16} />
             </IconButton>
-            <IconButton label="Maximize in monitor bounds" onClick={() => app && setSelectedRect({ x: 0, y: 0, width: monitor?.width ?? 1920, height: monitor?.height ?? 1080 })}>
+            <IconButton label="Fill monitor bounds" disabled={!app || !monitor} onClick={() => app && monitor && setSelectedRect({ x: 0, y: 0, width: monitor.width, height: monitor.height })}>
               <Maximize2 size={16} />
             </IconButton>
-            <IconButton label="Split apps evenly" onClick={splitEvenly}>
+            <IconButton label="Split profile apps evenly on this display" onClick={splitEvenly} disabled={!monitor || profile.apps.length === 0}>
               <AlignHorizontalSpaceAround size={16} />
             </IconButton>
           </div>
@@ -104,9 +119,12 @@ export function LayoutEditorPage({
       </section>
 
       <aside className="grid gap-4">
-        <section className="surface rounded-md p-4">
+        <section className="panel p-4">
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold uppercase tracking-normal text-[#8a94a3]">Selected app</h2>
+            <div className="min-w-0">
+              <div className="eyebrow">Selected app</div>
+              <h2 className="mt-1 truncate text-base font-semibold text-zinc-100">{app?.displayName ?? "None"}</h2>
+            </div>
             <div className="flex items-center gap-2">
               {app && (
                 <IconButton label={`Remove ${app.displayName} from profile`} onClick={() => onRemoveApp(app.id)} variant="danger">
@@ -124,7 +142,7 @@ export function LayoutEditorPage({
               <RectInput label="Height" value={app.layout.height} onChange={(value) => setSelectedRect({ ...app.layout, height: value })} />
             </div>
           ) : (
-            <div className="mt-4 text-sm text-zinc-500">No app selected</div>
+            <div className="mt-4 text-sm text-[#71818c]">No app selected</div>
           )}
         </section>
 

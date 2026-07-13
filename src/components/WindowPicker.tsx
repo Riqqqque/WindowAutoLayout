@@ -13,9 +13,12 @@ interface WindowPickerProps {
 
 export function WindowPicker({ windows, selectedHandle, onRefresh, onSelect, onSave }: WindowPickerProps) {
   return (
-    <div className="overflow-hidden rounded-md border border-[#252b34]">
-      <div className="flex items-center justify-between border-b border-[#252b34] bg-[#0d1117] px-3 py-2">
-        <span className="text-sm font-medium text-zinc-200">Detected windows</span>
+    <section className="panel overflow-hidden">
+      <div className="flex items-center justify-between border-b border-[#27313a] px-3 py-2.5">
+        <div>
+          <span className="text-sm font-semibold text-zinc-200">Detected windows</span>
+          <span className="ml-2 text-xs text-[#71818c]">{windows.length}</span>
+        </div>
         <div className="flex gap-2">
           <IconButton label="Refresh windows" onClick={onRefresh}>
             <RefreshCw size={16} />
@@ -25,41 +28,35 @@ export function WindowPicker({ windows, selectedHandle, onRefresh, onSelect, onS
           </IconButton>
         </div>
       </div>
-      <div className="max-h-72 overflow-auto">
+      <div className="max-h-[360px] overflow-auto bg-[#0c1217]">
         {windows.map((window) => (
           <button
             key={window.handle}
-            className={`grid w-full grid-cols-[1fr_120px_120px] gap-3 border-b border-[#151a21] px-3 py-2 text-left text-sm transition last:border-b-0 ${
+            className={`grid w-full grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-[#202a31] px-3 py-2.5 text-left text-sm transition last:border-b-0 ${
               selectedHandle === window.handle
-                ? "bg-[#5db7ff]/10 text-[#d7edff]"
-                : "bg-[#0d1117] text-zinc-300 hover:bg-[#121820]"
+                ? "bg-[#17303a] text-[#e1f8fb]"
+                : "text-zinc-300 hover:bg-[#121a20]"
             }`}
             onClick={() => onSelect(window.handle)}
           >
             <span className="min-w-0">
               <span className="block truncate font-medium">{window.title || "(Untitled)"}</span>
-              <span className="mt-1 flex flex-wrap items-center gap-1 text-xs text-[#8a94a3]">
-                <span className="truncate">
-                  {window.processName} / {window.className}
-                </span>
+              <span className="mt-1 flex min-w-0 flex-wrap items-center gap-1 text-xs text-[#758590]">
+                <span className="truncate">{window.processName}</span>
                 {!window.isVisible && <StatusBadge value="hidden" />}
                 {window.isMinimized && <StatusBadge value="minimized" />}
+                {window.isMaximized && <StatusBadge value="maximized" />}
               </span>
             </span>
-            <span className="text-xs text-zinc-400">
+            <span className="text-right text-xs text-zinc-400">
               {window.x}, {window.y}
               <br />
               {window.width} x {window.height}
             </span>
-            <span className="truncate text-xs text-[#8a94a3]" title={window.executablePath ?? ""}>
-              PID {window.processId}
-              <br />
-              {window.executablePath ?? "Path unavailable"}
-            </span>
           </button>
         ))}
-        {windows.length === 0 && <div className="px-3 py-8 text-center text-sm text-[#8a94a3]">No windows detected</div>}
+        {windows.length === 0 && <div className="px-3 py-8 text-center text-sm text-[#71818c]">No windows detected</div>}
       </div>
-    </div>
+    </section>
   );
 }

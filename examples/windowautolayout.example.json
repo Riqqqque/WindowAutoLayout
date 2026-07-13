@@ -1,11 +1,9 @@
 {
-  "schemaVersion": 3,
-  "appVersion": "0.1.18",
+  "schemaVersion": 5,
+  "appVersion": "0.1.23",
   "global": {
     "defaultMonitorId": null,
-    "monitorMissingBehavior": "nearestMatch",
-    "warnWhenMonitorMissing": true,
-    "advancedMode": false
+    "monitorMissingBehavior": "nearestMatch"
   },
   "startup": {
     "enabled": false,
@@ -13,24 +11,14 @@
     "defaultProfileId": "profile-streaming",
     "delaySeconds": 8,
     "restoreOnLaunch": true,
-    "launchMissingApps": true,
-    "enforceAfterStartup": true
+    "launchMissingApps": true
   },
   "tray": {
-    "minimizeToTrayOnClose": true,
-    "showRestoreStatus": true
-  },
-  "hotkey": {
-    "enabled": true,
-    "accelerator": "Ctrl+Alt+L",
-    "restoreWithoutOpening": true
+    "minimizeToTrayOnClose": true
   },
   "enforcement": {
     "enabled": false,
-    "profileId": "profile-streaming",
-    "durationSeconds": 30,
-    "intervalMs": 2000,
-    "pauseForFullscreenGames": true
+    "profileId": "profile-streaming"
   },
   "profiles": [
     {
@@ -38,8 +26,6 @@
       "name": "Streaming",
       "description": "OBS and Discord on the selected monitor.",
       "targetMonitorId": null,
-      "startupRestore": true,
-      "enforceAfterRestore": true,
       "apps": [
         {
           "id": "preset-obs",
@@ -56,7 +42,6 @@
           "launchDelaySeconds": 0,
           "detectionTimeoutSeconds": 25,
           "retryIntervalMs": 700,
-          "launchIfMissing": true,
           "moveIfRunning": true,
           "forceResize": true,
           "applyToAllMatchingWindows": false,
@@ -81,7 +66,6 @@
           "launchDelaySeconds": 0,
           "detectionTimeoutSeconds": 25,
           "retryIntervalMs": 700,
-          "launchIfMissing": true,
           "moveIfRunning": true,
           "forceResize": true,
           "applyToAllMatchingWindows": false,
@@ -106,7 +90,6 @@
           "launchDelaySeconds": 0,
           "detectionTimeoutSeconds": 45,
           "retryIntervalMs": 700,
-          "launchIfMissing": true,
           "moveIfRunning": true,
           "forceResize": true,
           "applyToAllMatchingWindows": false,

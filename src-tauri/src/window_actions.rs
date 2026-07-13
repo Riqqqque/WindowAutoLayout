@@ -1,17 +1,21 @@
-use std::{thread, time::Duration};
+use std::{ffi::c_void, thread, time::Duration};
 
 use windows::{
     core::BOOL,
     Win32::{
         Foundation::{GetLastError, HWND, LPARAM, RECT, WPARAM},
-        Graphics::Gdi::{
-            RedrawWindow, UpdateWindow, RDW_ALLCHILDREN, RDW_FRAME, RDW_INVALIDATE, RDW_UPDATENOW,
+        Graphics::{
+            Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS},
+            Gdi::{
+                RedrawWindow, UpdateWindow, RDW_ALLCHILDREN, RDW_FRAME, RDW_INVALIDATE,
+                RDW_UPDATENOW,
+            },
         },
         UI::WindowsAndMessaging::{
-            BringWindowToTop, EnumWindows, GetClassNameW, GetWindowTextW, GetWindowThreadProcessId,
-            IsIconic, PostMessageW, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_TOP,
-            SWP_NOACTIVATE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE,
-            SW_SHOW, WM_APP,
+            BringWindowToTop, EnumWindows, GetClassNameW, GetWindowRect, GetWindowTextW,
+            GetWindowThreadProcessId, IsIconic, IsZoomed, PostMessageW, SetForegroundWindow,
+            SetWindowPos, ShowWindow, HWND_TOP, SWP_NOACTIVATE, SWP_NOZORDER, SWP_SHOWWINDOW,
+            SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, WM_APP,
         },
     },
 };
@@ -34,18 +38,26 @@ pub fn apply_layout(
 ) -> AppResult<()> {
     let should_show =
         pull_hidden_window || (restore_if_minimized && unsafe { IsIconic(hwnd).as_bool() });
+    let should_unmaximize =
+        !matches!(state, WindowStatePreference::Minimized) && unsafe { IsZoomed(hwnd).as_bool() };
     if should_show {
-        show_window_for_restore(hwnd);
+        show_window_for_restore(hwnd, activate_after_show);
+    } else if should_unmaximize {
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+        }
+        thread::sleep(Duration::from_millis(120));
     }
 
-    let rect = absolute_rect(monitor, layout);
+    let frame_rect = absolute_rect(monitor, layout);
+    let window_rect = rect_for_set_window_pos(hwnd, frame_rect);
     let width = if force_resize {
-        rect.right - rect.left
+        window_rect.right - window_rect.left
     } else {
         0
     };
     let height = if force_resize {
-        rect.bottom - rect.top
+        window_rect.bottom - window_rect.top
     } else {
         0
     };
@@ -61,8 +73,8 @@ pub fn apply_layout(
         SetWindowPos(
             hwnd,
             Some(HWND_TOP),
-            rect.left,
-            rect.top,
+            window_rect.left,
+            window_rect.top,
             width,
             height,
             flags,
@@ -78,9 +90,7 @@ pub fn apply_layout(
 
     unsafe {
         match state {
-            WindowStatePreference::Normal => {
-                let _ = ShowWindow(hwnd, SW_RESTORE);
-            }
+            WindowStatePreference::Normal => {}
             WindowStatePreference::Maximized => {
                 let _ = ShowWindow(hwnd, SW_MAXIMIZE);
             }
@@ -91,19 +101,19 @@ pub fn apply_layout(
     }
 
     if activate_after_show {
-        wake_painted_window(hwnd);
+        wake_painted_window(hwnd, true);
     }
 
     Ok(())
 }
 
-pub fn show_window_for_restore(hwnd: HWND) {
+pub fn show_window_for_restore(hwnd: HWND, activate: bool) {
     unsafe {
         let _ = ShowWindow(hwnd, SW_RESTORE);
         let _ = ShowWindow(hwnd, SW_SHOW);
     }
     thread::sleep(Duration::from_millis(120));
-    wake_painted_window(hwnd);
+    wake_painted_window(hwnd, activate);
 }
 
 pub fn activate_qt_tray_icon_for_process(process_id: u32) -> bool {
@@ -132,10 +142,12 @@ pub fn activate_qt_tray_icon_for_process(process_id: u32) -> bool {
     sent
 }
 
-fn wake_painted_window(hwnd: HWND) {
+fn wake_painted_window(hwnd: HWND, activate: bool) {
     unsafe {
-        let _ = BringWindowToTop(hwnd);
-        let _ = SetForegroundWindow(hwnd);
+        if activate {
+            let _ = BringWindowToTop(hwnd);
+            let _ = SetForegroundWindow(hwnd);
+        }
         let _ = RedrawWindow(
             Some(hwnd),
             None,
@@ -203,6 +215,76 @@ fn nin_select_message() -> u32 {
     0x0400
 }
 
+fn rect_for_set_window_pos(hwnd: HWND, target_frame_rect: RECT) -> RECT {
+    window_frame_margins(hwnd)
+        .map(|margins| adjust_rect_for_frame_margins(target_frame_rect, margins))
+        .unwrap_or(target_frame_rect)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FrameMargins {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+fn window_frame_margins(hwnd: HWND) -> Option<FrameMargins> {
+    let mut outer = RECT::default();
+    let outer_ok = unsafe { GetWindowRect(hwnd, &mut outer) };
+    if outer_ok.is_err() {
+        return None;
+    }
+
+    let mut frame = RECT::default();
+    let frame_ok = unsafe {
+        DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            &mut frame as *mut RECT as *mut c_void,
+            std::mem::size_of::<RECT>() as u32,
+        )
+    };
+    if frame_ok.is_err() {
+        return None;
+    }
+
+    if outer.right <= outer.left
+        || outer.bottom <= outer.top
+        || frame.right <= frame.left
+        || frame.bottom <= frame.top
+    {
+        return None;
+    }
+
+    let margins = FrameMargins {
+        left: frame.left - outer.left,
+        top: frame.top - outer.top,
+        right: outer.right - frame.right,
+        bottom: outer.bottom - frame.bottom,
+    };
+    let values = [margins.left, margins.top, margins.right, margins.bottom];
+    if values
+        .iter()
+        .any(|value| *value < 0 || *value > MAX_FRAME_MARGIN_PX)
+    {
+        return None;
+    }
+
+    Some(margins)
+}
+
+const MAX_FRAME_MARGIN_PX: i32 = 128;
+
+fn adjust_rect_for_frame_margins(target_frame_rect: RECT, margins: FrameMargins) -> RECT {
+    RECT {
+        left: target_frame_rect.left - margins.left,
+        top: target_frame_rect.top - margins.top,
+        right: target_frame_rect.right + margins.right,
+        bottom: target_frame_rect.bottom + margins.bottom,
+    }
+}
+
 pub fn absolute_rect(monitor: &MonitorInfo, layout: &LayoutRect) -> RECT {
     RECT {
         left: monitor.x + layout.x,
@@ -252,5 +334,29 @@ mod tests {
         let rect = absolute_rect(&monitor, &layout);
         assert_eq!(rect.left, -1820);
         assert_eq!(relative_rect(&monitor, rect), layout);
+    }
+
+    #[test]
+    fn adjusts_saved_frame_rect_to_outer_window_rect() {
+        let target = RECT {
+            left: -3061,
+            top: -244,
+            right: -1167,
+            bottom: 815,
+        };
+        let adjusted = adjust_rect_for_frame_margins(
+            target,
+            FrameMargins {
+                left: 9,
+                top: 0,
+                right: 9,
+                bottom: 9,
+            },
+        );
+
+        assert_eq!(adjusted.left, -3070);
+        assert_eq!(adjusted.top, -244);
+        assert_eq!(adjusted.right, -1158);
+        assert_eq!(adjusted.bottom, 824);
     }
 }

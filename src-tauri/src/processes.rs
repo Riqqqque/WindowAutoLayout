@@ -54,10 +54,15 @@ pub fn list_processes() -> AppResult<Vec<ProcessInfo>> {
 }
 
 pub fn query_process_name(pid: u32) -> String {
-    list_processes()
-        .ok()
-        .and_then(|processes| processes.into_iter().find(|process| process.pid == pid))
-        .map(|process| process.name)
+    query_process_path(pid)
+        .as_deref()
+        .and_then(file_name_from_path)
+        .or_else(|| {
+            list_processes()
+                .ok()
+                .and_then(|processes| processes.into_iter().find(|process| process.pid == pid))
+                .map(|process| process.name)
+        })
         .unwrap_or_default()
 }
 
@@ -90,10 +95,50 @@ pub fn file_name_from_path(path: &str) -> Option<String> {
         .map(|value| value.to_string_lossy().to_string())
 }
 
+pub fn windows_app_package_family(path: &str) -> Option<String> {
+    let normalized = path.replace('/', "\\");
+    let lower = normalized.to_ascii_lowercase();
+    let marker = "\\windowsapps\\";
+    let start = lower.find(marker)? + marker.len();
+    let package_full_name = normalized[start..].split('\\').next()?;
+    let (name_and_version, publisher_id) = package_full_name.rsplit_once("__")?;
+    let package_name = name_and_version.split('_').next()?;
+    if package_name.is_empty() || publisher_id.is_empty() {
+        return None;
+    }
+
+    Some(format!("{package_name}_{publisher_id}"))
+}
+
+pub fn same_windows_app_package(left: &str, right: &str) -> bool {
+    windows_app_package_family(left)
+        .zip(windows_app_package_family(right))
+        .map(|(left, right)| left.eq_ignore_ascii_case(&right))
+        .unwrap_or(false)
+}
+
 fn wide_to_string(buffer: &[u16]) -> String {
     let len = buffer
         .iter()
         .position(|ch| *ch == 0)
         .unwrap_or(buffer.len());
     String::from_utf16_lossy(&buffer[..len])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn store_package_identity_survives_versioned_folder_changes() {
+        let old = r"C:\Program Files\WindowsApps\OpenAI.Codex_26.623.5546.0_x64__2p2nqsd0c76g0\app\Codex.exe";
+        let new = r"C:\Program Files\WindowsApps\OpenAI.Codex_26.707.3563.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe";
+
+        assert_eq!(
+            windows_app_package_family(old).as_deref(),
+            Some("OpenAI.Codex_2p2nqsd0c76g0")
+        );
+        assert!(same_windows_app_package(old, new));
+        assert!(!same_windows_app_package(old, r"C:\Apps\Discord.exe"));
+    }
 }

@@ -1,7 +1,8 @@
-import { Check, Download, Upload } from "lucide-react";
+import { Check, Download, ShieldCheck, Upload } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Field, NumberInput, SelectInput, TextArea, TextInput, Toggle } from "../components/Form";
+import { Field, NumberInput, SelectInput, TextArea, Toggle } from "../components/Form";
 import { IconButton } from "../components/IconButton";
+import { api } from "../lib/api";
 import type { MonitorInfo, MonitorMissingBehavior, WindowAutoLayoutConfig } from "../lib/types";
 
 interface SettingsProps {
@@ -13,7 +14,11 @@ interface SettingsProps {
   onSave: () => void;
 }
 
-const fallbackModes: MonitorMissingBehavior[] = ["doNothing", "usePrimary", "nearestMatch", "askNextOpen"];
+const fallbackModes: Array<{ value: MonitorMissingBehavior; label: string }> = [
+  { value: "doNothing", label: "Do nothing" },
+  { value: "usePrimary", label: "Use primary display" },
+  { value: "nearestMatch", label: "Use nearest match" },
+];
 
 export function SettingsPage({ config, monitors, configPath, logPath, onConfigChange, onSave }: SettingsProps) {
   const [importText, setImportText] = useState("");
@@ -24,10 +29,9 @@ export function SettingsPage({ config, monitors, configPath, logPath, onConfigCh
       ? config.global.defaultMonitorId
       : null;
 
-  function importConfig() {
+  async function importConfig() {
     try {
-      const parsed = JSON.parse(importText) as WindowAutoLayoutConfig;
-      onConfigChange(parsed);
+      onConfigChange(await api.parseConfigJson(importText));
       setImportError(null);
     } catch (error) {
       setImportError(`Import failed: ${String(error)}`);
@@ -45,110 +49,112 @@ export function SettingsPage({ config, monitors, configPath, logPath, onConfigCh
   }
 
   return (
-    <div className="grid gap-4 xl:grid-cols-2">
-      <section className="surface rounded-md p-4">
-        <div className="flex items-center justify-between gap-3">
-          <h1 className="text-lg font-semibold text-zinc-50">Settings</h1>
-          <IconButton label="Save settings" onClick={onSave} variant="solid">
-            <Check size={16} />
-          </IconButton>
-        </div>
+    <div className="page-stack">
+      <div className="grid gap-4 lg:grid-cols-2">
+        <section className="panel p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="eyebrow">Windows</div>
+              <h1 className="mt-1 section-heading">Startup and tray</h1>
+            </div>
+            <IconButton label="Save settings" onClick={onSave} variant="solid">
+              <Check size={16} />
+            </IconButton>
+          </div>
 
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <Field label="Default monitor">
-            <SelectInput
-              value={config.global.defaultMonitorId ?? ""}
-              onChange={(event) => onConfigChange({ ...config, global: { ...config.global, defaultMonitorId: event.target.value || null } })}
-            >
-              <option value="">No default</option>
-              {missingDefaultMonitor && <option value={missingDefaultMonitor}>Missing: {missingDefaultMonitor}</option>}
-              {monitors.map((monitor) => (
-                <option key={monitor.id} value={monitor.id}>
-                  {monitor.name} - {monitor.width}x{monitor.height}
-                </option>
-              ))}
-            </SelectInput>
-          </Field>
-          <Field label="Monitor fallback">
-            <SelectInput
-              value={config.global.monitorMissingBehavior}
-              onChange={(event) =>
-                onConfigChange({
+          <div className="mt-4 max-w-xs">
+            <Field label="Startup delay seconds">
+              <NumberInput
+                min={0}
+                max={300}
+                value={config.startup.delaySeconds}
+                onChange={(event) => onConfigChange({ ...config, startup: { ...config.startup, delaySeconds: Number(event.target.value) } })}
+              />
+            </Field>
+          </div>
+          <div className="mt-4 grid gap-2 md:grid-cols-2">
+            <Toggle label="Start with Windows" checked={config.startup.enabled} onChange={(checked) => onConfigChange({ ...config, startup: { ...config.startup, enabled: checked } })} />
+            <Toggle label="Start minimized to tray" checked={config.startup.startMinimizedToTray} onChange={(checked) => onConfigChange({ ...config, startup: { ...config.startup, startMinimizedToTray: checked } })} />
+            <Toggle label="Restore on launch" checked={config.startup.restoreOnLaunch} onChange={(checked) => onConfigChange({ ...config, startup: { ...config.startup, restoreOnLaunch: checked } })} />
+            <Toggle label="Close button goes to tray" checked={config.tray.minimizeToTrayOnClose} onChange={(checked) => onConfigChange({ ...config, tray: { ...config.tray, minimizeToTrayOnClose: checked } })} />
+          </div>
+        </section>
+
+        <section className="panel p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="eyebrow">Placement</div>
+              <h2 className="mt-1 section-heading">Displays and game safety</h2>
+            </div>
+            <ShieldCheck size={19} className="text-[#42d392]" />
+          </div>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <Field label="Default monitor">
+              <SelectInput
+                value={config.global.defaultMonitorId ?? ""}
+                onChange={(event) => onConfigChange({ ...config, global: { ...config.global, defaultMonitorId: event.target.value || null } })}
+              >
+                <option value="">No default</option>
+                {missingDefaultMonitor && <option value={missingDefaultMonitor}>Missing: {missingDefaultMonitor}</option>}
+                {monitors.map((monitor) => (
+                  <option key={monitor.id} value={monitor.id}>
+                    {monitor.name} - {monitor.width}x{monitor.height}
+                  </option>
+                ))}
+              </SelectInput>
+            </Field>
+            <Field label="Missing monitor">
+              <SelectInput
+                value={config.global.monitorMissingBehavior}
+                onChange={(event) => onConfigChange({
                   ...config,
                   global: { ...config.global, monitorMissingBehavior: event.target.value as MonitorMissingBehavior },
-                })
-              }
-            >
-              {fallbackModes.map((mode) => (
-                <option key={mode} value={mode}>
-                  {mode}
-                </option>
-              ))}
-            </SelectInput>
-          </Field>
-          <Field label="Startup delay seconds">
-            <NumberInput
-              min={0}
-              value={config.startup.delaySeconds}
-              onChange={(event) => onConfigChange({ ...config, startup: { ...config.startup, delaySeconds: Number(event.target.value) } })}
-            />
-          </Field>
-          <Field label="Hotkey">
-            <TextInput
-              value={config.hotkey.accelerator}
-              onChange={(event) => onConfigChange({ ...config, hotkey: { ...config.hotkey, accelerator: event.target.value } })}
-            />
-          </Field>
-          <Field label="Lock interval ms">
-            <NumberInput
-              min={2000}
-              max={5000}
-              step={500}
-              value={config.enforcement.intervalMs}
-              onChange={(event) =>
-                onConfigChange({ ...config, enforcement: { ...config.enforcement, intervalMs: Number(event.target.value) } })
-              }
-            />
-          </Field>
-        </div>
+                })}
+              >
+                {fallbackModes.map((mode) => (
+                  <option key={mode.value} value={mode.value}>
+                    {mode.label}
+                  </option>
+                ))}
+              </SelectInput>
+            </Field>
+          </div>
+          <div className="mt-4 grid gap-2 border-t border-[#27313a] pt-4 text-sm">
+            <div className="flex items-center justify-between"><span className="text-[#91a0ab]">Game protection</span><span className="text-[#aef2d1]">Always on</span></div>
+            <div className="flex items-center justify-between"><span className="text-[#91a0ab]">Input hooks</span><span className="text-[#aef2d1]">None</span></div>
+            <div className="flex items-center justify-between"><span className="text-[#91a0ab]">Background lock</span><span className="text-[#aef2d1]">Event driven</span></div>
+          </div>
+        </section>
+      </div>
 
-        <div className="mt-4 grid gap-2 md:grid-cols-2">
-          <Toggle label="Start with Windows" checked={config.startup.enabled} onChange={(checked) => onConfigChange({ ...config, startup: { ...config.startup, enabled: checked } })} />
-          <Toggle label="Start minimized to tray" checked={config.startup.startMinimizedToTray} onChange={(checked) => onConfigChange({ ...config, startup: { ...config.startup, startMinimizedToTray: checked } })} />
-          <Toggle label="Restore on launch" checked={config.startup.restoreOnLaunch} onChange={(checked) => onConfigChange({ ...config, startup: { ...config.startup, restoreOnLaunch: checked } })} />
-          <Toggle label="Minimize close button to tray" checked={config.tray.minimizeToTrayOnClose} onChange={(checked) => onConfigChange({ ...config, tray: { ...config.tray, minimizeToTrayOnClose: checked } })} />
-          <Toggle label="Enable hotkey" checked={config.hotkey.enabled} onChange={(checked) => onConfigChange({ ...config, hotkey: { ...config.hotkey, enabled: checked } })} />
-          <Toggle label="Pause lock during fullscreen apps" checked={config.enforcement.pauseForFullscreenGames} onChange={(checked) => onConfigChange({ ...config, enforcement: { ...config.enforcement, pauseForFullscreenGames: checked } })} />
-          <Toggle label="Warn when monitor is missing" checked={config.global.warnWhenMonitorMissing} onChange={(checked) => onConfigChange({ ...config, global: { ...config.global, warnWhenMonitorMissing: checked } })} />
-          <Toggle label="Advanced mode" checked={config.global.advancedMode} onChange={(checked) => onConfigChange({ ...config, global: { ...config.global, advancedMode: checked } })} />
-        </div>
-
-        <div className="mt-4 grid gap-2 text-xs text-zinc-500">
-          {configPath && <div className="truncate">Config: {configPath}</div>}
-          {logPath && <div className="truncate">Logs: {logPath}</div>}
-        </div>
-      </section>
-
-      <section className="surface rounded-md p-4">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold text-zinc-50">Import / export</h2>
+      <section className="panel p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="eyebrow">Configuration</div>
+            <h2 className="mt-1 section-heading">Import and export</h2>
+          </div>
           <div className="flex gap-2">
             <IconButton label="Download config JSON" onClick={downloadConfig}>
               <Download size={16} />
             </IconButton>
-            <IconButton label="Import pasted JSON" onClick={importConfig} disabled={!importText.trim()}>
+            <IconButton label="Import pasted JSON" onClick={importConfig} disabled={!importText.trim()} variant="solid">
               <Upload size={16} />
             </IconButton>
           </div>
         </div>
-        <div className="mt-4 grid gap-4">
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
           <Field label="Current config">
             <TextArea value={exportText} readOnly className="min-h-64 font-mono text-xs" />
           </Field>
           <Field label="Import JSON">
-            <TextArea value={importText} onChange={(event) => setImportText(event.target.value)} className="min-h-40 font-mono text-xs" />
+            <TextArea value={importText} onChange={(event) => setImportText(event.target.value)} className="min-h-64 font-mono text-xs" />
           </Field>
-          {importError && <div className="rounded-md border border-rose-400/30 bg-rose-400/10 px-3 py-2 text-sm text-rose-100">{importError}</div>}
+        </div>
+        {importError && <div className="mt-3 rounded-md border border-rose-400/30 bg-rose-400/10 px-3 py-2 text-sm text-rose-100">{importError}</div>}
+        <div className="mt-4 grid gap-1 border-t border-[#27313a] pt-3 text-xs text-[#71818c]">
+          {configPath && <div className="truncate" title={configPath}>Config: {configPath}</div>}
+          {logPath && <div className="truncate" title={logPath}>Logs: {logPath}</div>}
         </div>
       </section>
     </div>
