@@ -1,5 +1,15 @@
-import { AlertTriangle, Camera, CheckCircle2, LockKeyhole, Monitor, Play, RefreshCw, Trash2, UnlockKeyhole } from "lucide-react";
-import type { AppConfig, MonitorInfo, Profile, RestoreResult, WindowAutoLayoutConfig, WindowInfo } from "../lib/types";
+import {
+  AlertTriangle,
+  Camera,
+  CheckCircle2,
+  LockKeyhole,
+  Monitor,
+  Play,
+  RefreshCw,
+  Trash2,
+  UnlockKeyhole,
+} from "lucide-react";
+import type { AppConfig, MonitorInfo, Profile, RestoreResult, RuntimeStatus, WindowAutoLayoutConfig, WindowInfo } from "../lib/types";
 import { monitorLabel, resolveProfileMonitor } from "../lib/helpers";
 import { StatusBadge } from "../components/StatusBadge";
 import { IconButton } from "../components/IconButton";
@@ -13,7 +23,7 @@ interface DashboardProps {
   lastRestore?: RestoreResult | null;
   validation: string[];
   busy: boolean;
-  layoutLocked: boolean;
+  runtimeStatus: RuntimeStatus;
   captureMonitorId: string;
   onProfileChange: (profileId: string) => void;
   onRestore: () => void;
@@ -32,7 +42,7 @@ export function Dashboard({
   lastRestore,
   validation,
   busy,
-  layoutLocked,
+  runtimeStatus,
   captureMonitorId,
   onProfileChange,
   onRestore,
@@ -44,36 +54,20 @@ export function Dashboard({
 }: DashboardProps) {
   const resolvedMonitor = resolveProfileMonitor(config, profile, monitors);
   const monitor = resolvedMonitor.monitor;
-  const monitorDetail = monitor
-    ? `${resolvedMonitor.isFallback ? "Using fallback " : ""}${monitorLabel(monitor)}`
-    : "Saved monitor missing";
   const visibleWindows = windows.filter((window) => window.isVisible && !window.isMinimized).length;
   const hiddenWindows = windows.filter((window) => !window.isVisible || window.isMinimized).length;
-  const startupDetail = config.startup.enabled
-    ? config.startup.restoreOnLaunch
-      ? "Restore on launch"
-      : "Starts without restore"
-    : "Startup disabled";
+  const profileIsAutomatic = runtimeStatus.automaticRestoreEnabled
+    && runtimeStatus.automaticRestoreProfileId === profile.id;
 
   return (
-    <div className="grid gap-4">
-      <section className="surface rounded-md p-4">
+    <div className="page-stack">
+      <section className="panel-raised p-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-2xl font-semibold text-zinc-50">Restore workspace</h1>
-              <span
-                className={`mt-0.5 inline-flex h-6 items-center rounded-md border px-2 text-xs font-semibold ${
-                  layoutLocked
-                    ? "border-[#39d98a]/35 bg-[#39d98a]/10 text-[#a8f3cf]"
-                    : "border-[#485363] bg-[#485363]/12 text-zinc-300"
-                }`}
-              >
-                {layoutLocked ? "Lock active" : "Manual"}
-              </span>
-            </div>
-            <p className="mt-1 max-w-2xl text-sm leading-6 text-[#9aa5b3]">
-              {profile.description?.trim() || "Launch missing apps, pull tray windows forward, and place everything on the selected monitor."}
+            <div className="eyebrow">Current layout</div>
+            <h1 className="mt-1 truncate text-xl font-semibold text-zinc-50">{profile.name}</h1>
+            <p className="mt-1 max-w-2xl text-sm leading-5 text-[#91a0ab]">
+              {profile.description?.trim() || `${profile.apps.length} saved apps`}
             </p>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
@@ -84,123 +78,125 @@ export function Dashboard({
                 </option>
               ))}
             </SelectInput>
-            <button
-              className="inline-flex h-10 items-center gap-2 rounded-md border border-[#5db7ff]/60 bg-[#5db7ff] px-4 text-sm font-semibold text-[#071019] transition hover:bg-[#86caff] disabled:cursor-not-allowed disabled:opacity-40"
-              onClick={onRestore}
-              disabled={busy}
-            >
+            <button className="button-primary" onClick={onRestore} disabled={busy}>
               <Play size={16} />
-              Restore
+              Restore windows now
             </button>
             <button
-              className={`inline-flex h-10 items-center gap-2 rounded-md border px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${
-                layoutLocked
-                  ? "border-[#39d98a]/50 bg-[#39d98a]/15 text-[#a8f3cf] hover:bg-[#39d98a]/20"
-                  : "border-[#2a323d] bg-[#111820] text-zinc-200 hover:border-[#455364] hover:bg-[#17202a]"
-              }`}
+              className={profileIsAutomatic ? "button-secondary border-[#42d392]/55 text-[#aef2d1]" : "button-secondary"}
               onClick={onLockToggle}
               disabled={busy}
             >
-              {layoutLocked ? <LockKeyhole size={16} /> : <UnlockKeyhole size={16} />}
-              {layoutLocked ? "Locked" : "Lock"}
+              {profileIsAutomatic ? <LockKeyhole size={16} /> : <UnlockKeyhole size={16} />}
+              {profileIsAutomatic
+                ? "Automatic on"
+                : runtimeStatus.automaticRestoreEnabled
+                  ? "Use automatically"
+                  : "Automatic off"}
             </button>
-            <IconButton label="Refresh" onClick={onRefresh}>
+            <IconButton label="Refresh" onClick={onRefresh} disabled={busy}>
               <RefreshCw size={16} />
             </IconButton>
           </div>
         </div>
+
+        <div className="mt-4 flex flex-wrap items-end gap-2 border-t border-[#2b3740] pt-4">
+          <label className="grid min-w-[240px] flex-1 gap-1.5">
+            <span className="field-label">Capture monitor</span>
+            <SelectInput
+              id="capture-monitor"
+              aria-label="Capture monitor"
+              value={captureMonitorId}
+              onChange={(event) => onCaptureMonitorChange(event.target.value)}
+              disabled={busy || monitors.length === 0}
+            >
+              {monitors.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {monitorLabel(item)}
+                </option>
+              ))}
+            </SelectInput>
+          </label>
+          <button className="button-secondary" onClick={onCaptureCurrentLayout} disabled={busy || !captureMonitorId}>
+            <Camera size={15} />
+            Capture current layout
+          </button>
+        </div>
       </section>
 
-      <section className="grid gap-3 md:grid-cols-4">
-        <Metric label="Monitors" value={String(monitors.length)} detail={monitorDetail} tone="blue" />
-        <Metric label="Visible windows" value={String(visibleWindows)} detail={`${hiddenWindows} hidden or minimized`} tone="green" />
-        <Metric label="Profile apps" value={String(profile.apps.length)} detail={profile.name} tone="amber" />
-        <Metric label="Startup" value={config.startup.enabled ? "On" : "Off"} detail={startupDetail} tone="neutral" />
+      <section className="metric-strip">
+        <Metric label="Displays" value={String(monitors.length)} detail={monitor ? monitorLabel(monitor) : "Target missing"} />
+        <Metric label="Windows ready" value={String(visibleWindows)} detail={`${hiddenWindows} hidden or minimized`} />
+        <Metric label="Automatic restore" value={runtimeStatus.automaticRestoreEnabled ? "On" : "Off"} detail={runtimeStatus.automaticRestoreProfileName ?? "Manual only"} />
+        <Metric label="Startup" value={runtimeStatus.startupRegistered ? "On" : "Off"} detail={runtimeStatus.startupRegistered ? "Tray resident" : "Not registered"} />
       </section>
 
-      <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-        <section className="surface rounded-md p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_330px]">
+        <section className="panel min-w-0 p-4">
+          <div className="flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-lg font-semibold text-zinc-50">Apps in profile</h2>
-              <p className="mt-1 text-sm text-[#8a94a3]">What restore will target right now.</p>
+              <h2 className="section-heading">Profile apps</h2>
+              <div className="mt-1 text-xs text-[#7e8d98]">{profile.apps.length} restore targets</div>
             </div>
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <label className="sr-only" htmlFor="capture-monitor">
-                Capture monitor
-              </label>
-              <SelectInput
-                id="capture-monitor"
-                value={captureMonitorId}
-                onChange={(event) => onCaptureMonitorChange(event.target.value)}
-                className="min-w-52"
-                disabled={busy || monitors.length === 0}
-              >
-                {monitors.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {monitorLabel(item)}
-                  </option>
-                ))}
-              </SelectInput>
-              <button
-                className="inline-flex h-9 items-center gap-2 rounded-md border border-[#2a323d] bg-[#111820] px-3 text-sm font-semibold text-zinc-200 transition hover:border-[#455364] hover:bg-[#17202a] disabled:cursor-not-allowed disabled:opacity-40"
-                onClick={onCaptureCurrentLayout}
-                disabled={busy || !captureMonitorId}
-              >
-                <Camera size={15} />
-                Capture current layout
-              </button>
-            </div>
+            {lastRestore && <StatusBadge value={lastRestore.status} />}
           </div>
-          <div className="mt-4 grid gap-2">
+
+          <div className="data-list mt-4">
             {profile.apps.map((app) => (
               <AppRow key={app.id} app={app} windows={windows} lastRestore={lastRestore} onRemove={() => onRemoveApp(app.id)} />
             ))}
-            {profile.apps.length === 0 && (
-              <div className="surface-soft rounded-md px-3 py-8 text-center text-sm text-[#8a94a3]">No apps are configured in this profile.</div>
-            )}
+            {profile.apps.length === 0 && <div className="px-4 py-10 text-center text-sm text-[#7e8d98]">No apps in this profile</div>}
           </div>
         </section>
 
-        <section className="grid gap-4">
-          <section className="surface rounded-md p-4">
-            <h2 className="text-sm font-semibold uppercase tracking-normal text-[#8a94a3]">Health</h2>
+        <aside className="grid content-start gap-4">
+          <section className="panel p-4">
+            <h2 className="section-heading">System status</h2>
             <div className="mt-3 grid gap-2">
-              {validation.length === 0 && (
-                <div className="flex items-center gap-2 rounded-md border border-[#39d98a]/25 bg-[#39d98a]/10 px-3 py-2 text-sm text-[#a8f3cf]">
+              {validation.length === 0 ? (
+                <div className="flex items-center gap-2 text-sm text-[#aef2d1]">
                   <CheckCircle2 size={16} />
                   Config checks passed
                 </div>
+              ) : (
+                validation.map((issue) => (
+                  <div key={issue} className="flex gap-2 text-sm text-amber-200">
+                    <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                    <span>{issue}</span>
+                  </div>
+                ))
               )}
-              {validation.map((issue) => (
-                <div key={issue} className="flex gap-2 rounded-md border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-sm text-amber-100">
-                  <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-                  <span>{issue}</span>
-                </div>
-              ))}
+              <div className="mt-2 flex items-center justify-between border-t border-[#27313a] pt-3 text-sm">
+                <span className="text-[#91a0ab]">Automatic restore</span>
+                <span className={runtimeStatus.automaticRestoreEnabled ? "text-[#aef2d1]" : "text-[#91a0ab]"}>{runtimeStatus.automaticRestoreEnabled ? "On" : "Off"}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-[#91a0ab]">Input hooks</span>
+                <span className="text-[#aef2d1]">None</span>
+              </div>
             </div>
           </section>
 
-          <section className="surface rounded-md p-4">
-            <h2 className="text-sm font-semibold uppercase tracking-normal text-[#8a94a3]">Monitors</h2>
-            <div className="mt-3 grid gap-2">
+          <section className="panel p-4">
+            <h2 className="section-heading">Displays</h2>
+            <div className="mt-3 divide-y divide-[#27313a]">
               {monitors.map((item) => (
-                <div key={item.id} className="surface-soft rounded-md px-3 py-2">
+                <div key={item.id} className="py-3 first:pt-0 last:pb-0">
                   <div className="flex items-center justify-between gap-3">
                     <span className="flex min-w-0 items-center gap-2 truncate text-sm font-medium text-zinc-200">
-                      <Monitor size={15} className="shrink-0 text-[#5db7ff]" />
+                      <Monitor size={15} className="shrink-0 text-[#43c7e7]" />
                       {item.name}
                     </span>
-                    {item.isPrimary && <StatusBadge value="success" className="text-[11px]" />}
+                    {item.isPrimary && <span className="text-[11px] font-semibold text-[#bcecf5]">Primary</span>}
                   </div>
-                  <div className="mt-1 text-xs text-[#8a94a3]">
-                    {item.x}, {item.y} - {item.width} x {item.height} - scale {item.scaleFactor.toFixed(2)}
+                  <div className="mt-1 pl-[23px] text-xs text-[#71818c]">
+                    {item.width} x {item.height} at {item.x}, {item.y} / {Math.round(item.scaleFactor * 100)}%
                   </div>
                 </div>
               ))}
             </div>
           </section>
-        </section>
+        </aside>
       </div>
     </div>
   );
@@ -222,41 +218,32 @@ function AppRow({
   const restoreStatus = lastRestore?.results.find((result) => result.appId === app.id)?.status;
 
   return (
-    <div className="grid gap-3 rounded-md border border-[#252b34] bg-[#0d1117] px-3 py-3 md:grid-cols-[minmax(0,1fr)_120px_132px_44px]">
+    <div className="data-row grid min-h-[66px] items-center gap-3 px-3 py-2.5 md:grid-cols-[minmax(0,1fr)_120px_132px_38px]">
       <div className="min-w-0">
         <div className="truncate text-sm font-semibold text-zinc-100">{app.displayName}</div>
-        <div className="mt-1 truncate text-xs text-[#8a94a3]">{app.processName ?? "Process unset"}</div>
+        <div className="mt-1 truncate text-xs text-[#758590]">{app.processName ?? "Process unset"}</div>
       </div>
-      <div className="text-xs text-[#8a94a3]">
+      <div className="text-xs text-[#7f8f99]">
         <span className="block font-medium text-zinc-300">{app.layout.width} x {app.layout.height}</span>
-        <span>
-          {app.layout.x}, {app.layout.y}
-        </span>
+        <span>{app.layout.x}, {app.layout.y}</span>
       </div>
-      <div className="flex items-center justify-start gap-2 md:justify-end">
-        {restoreStatus ? <StatusBadge value={restoreStatus} /> : <StatusBadge value={matches > 0 ? "success" : "skipped"} />}
-        <span className="text-xs text-[#8a94a3]">{matches} live</span>
+      <div className="flex items-center gap-2 md:justify-end">
+        <StatusBadge value={restoreStatus ?? (matches > 0 ? "running" : "notRunning")} />
+        <span className="text-xs text-[#758590]">{matches} live</span>
       </div>
-      <IconButton label={`Remove ${app.displayName} from profile`} onClick={onRemove} variant="danger" className="justify-self-start md:justify-self-end">
+      <IconButton label={`Remove ${app.displayName} from profile`} onClick={onRemove} variant="danger">
         <Trash2 size={15} />
       </IconButton>
     </div>
   );
 }
 
-function Metric({ label, value, detail, tone }: { label: string; value: string; detail: string; tone: "blue" | "green" | "amber" | "neutral" }) {
-  const toneClass = {
-    blue: "border-[#5db7ff]/30",
-    green: "border-[#39d98a]/30",
-    amber: "border-[#f7bf4f]/30",
-    neutral: "border-[#34404d]",
-  }[tone];
-
+function Metric({ label, value, detail }: { label: string; value: string; detail: string }) {
   return (
-    <div className={`surface-soft rounded-md p-3 ${toneClass}`}>
-      <div className="text-[11px] font-semibold uppercase tracking-normal text-[#8a94a3]">{label}</div>
-      <div className="mt-2 text-2xl font-semibold text-zinc-50">{value}</div>
-      <div className="mt-1 truncate text-xs text-[#8a94a3]">{detail}</div>
+    <div className="metric-cell">
+      <div className="eyebrow">{label}</div>
+      <div className="mt-1.5 text-xl font-semibold text-zinc-50">{value}</div>
+      <div className="mt-1 truncate text-xs text-[#758590]">{detail}</div>
     </div>
   );
 }

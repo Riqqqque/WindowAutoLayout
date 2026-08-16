@@ -24,9 +24,16 @@ What WindowAutoLayout should do:
 
 1. Detect that `obs64.exe` is already running.
 2. Avoid launching a duplicate OBS process.
-3. Ask OBS through its tray icon path if OBS has no normal main window.
+3. Ask OBS through its tray icon path when the main window is hidden or minimized.
 4. Wait for the real OBS window to show and repaint.
 5. Apply the saved layout.
+6. Queue a no-focus surface relayout and child repaint.
+
+The final no-focus refresh is shared by all restored apps. It prevents stale dock cuts and blank client areas without adding any background repaint loop.
+
+Minimized OBS windows use the Qt tray restore handler first. Directly changing the Win32 show state can expose an OBS frame before Qt has rebuilt its docks, which is the white-client symptom this path avoids.
+
+OBS then receives one bounded presentation recovery. WindowAutoLayout verifies that Windows actually reached the minimized state, restores the window, verifies that it is no longer minimized, and gives Qt time to present the rebuilt interface. The recovery is blocked while a game or fullscreen app is foreground, and the previous window is restored only when focus stayed on OBS during the pulse.
 
 Good log lines look like:
 
@@ -37,6 +44,18 @@ Restore finished with status Success
 ```
 
 If OBS still does not appear, click the OBS tray icon manually once, save the main OBS window again from Layout, then restore again. That confirms the saved entry points at the real OBS main window instead of a dock panel.
+
+## Restored Window Is Blank Until Clicked
+
+WindowAutoLayout uses an asynchronous exposure cycle for windows coming out of the tray or a minimized state, then performs one bounded resize and queues a full client repaint. OBS also gets the state-verified presentation recovery described above. No mouse click or key press is synthesized, and there is no repaint activity after the restore finishes.
+
+If one app still remains blank, confirm its saved entry targets the real main window rather than a splash, helper, dock, or GPU overlay window. Capture that app again while its main interface is visible, then inspect the matched title and class in Layout.
+
+## Restore Button Or Tray State Looks Stuck
+
+The app header and tray menu should both show `Restoring` only while one restore is active. Duplicate restore controls are intentionally disabled during that time.
+
+If the state does not clear, open the activity log and look for a target app that stopped responding during launch or window recovery. Exit WindowAutoLayout from the tray and reopen it; the single-instance guard prevents a second background copy from taking over the tray state.
 
 ## OBS Says It Is Already Running
 
@@ -76,6 +95,8 @@ Check the app entry:
 
 If the executable path is blank, WindowAutoLayout tries normal Windows discovery paths, app paths, Start Menu shortcuts, common install folders, and `PATH`.
 
+`Launch apps that are closed` may be turned off. That prevents new process launches but does not prevent WindowAutoLayout from recovering an app that is already running in the tray.
+
 ## App Is Running But No Window Is Found
 
 This usually means the app is in the tray, still loading, elevated, or showing a splash/update/login window.
@@ -91,32 +112,39 @@ Try:
 
 ## Window Moves To The Wrong Monitor
 
-WindowAutoLayout saves positions relative to the target monitor. If monitor IDs change after unplugging, driver updates, or display rearranges, the saved target can point somewhere unexpected.
+WindowAutoLayout saves positions relative to a hardware-backed monitor identity. Version 0.1.28 migrates older `DISPLAY1` and `DISPLAY2` targets and uses saved canvas dimensions when Windows has reassigned those volatile names.
 
 Fix:
 
-1. Go to Settings and refresh monitors.
-2. Pick the default monitor again.
+1. Go to Settings and confirm the monitor model and resolution shown as the default.
+2. Refresh app data after reconnecting or rearranging displays.
 3. Check the profile target monitor.
 4. Check app-level target monitors.
-5. Save the layout again if the monitor arrangement changed.
+5. Save the layout again only if the physical workspace itself changed.
+
+Captured layouts include the display's physical resolution and usable work area. A resolution or taskbar change is mapped into the new area. On an unchanged display, saved coordinates remain exact instead of being rescaled.
+
+## Window Is A Few Pixels Off
+
+Normal-window restores are checked repeatedly against the DWM frame bounds with a one-pixel tolerance. If an app keeps overriding its own size or location, the restore result reports both the expected and actual rectangle instead of claiming success.
+
+Check whether the app is elevated, enforcing a minimum size, restoring its own session, or using a saved maximized state. Capture the settled main window again after the app has finished loading.
 
 ## Show Desktop Still Hides Windows
 
-The Windows Show Desktop command can minimize windows. Layout lock is the recovery mechanism.
+The Windows Show Desktop command can minimize windows. Automatic restore is the recovery mechanism.
 
-Turn on layout lock for the profile. While the lock is active, WindowAutoLayout watches the managed windows and restores the profile when one moves, minimizes, hides, or disappears.
+Turn on automatic restore for the profile, enable `Restore after Show Desktop`, and leave WindowAutoLayout running in the tray. The event guard restores already-running profile windows without launching apps or taking focus.
 
-## Hotkey Does Nothing
+## Game Or Input Feels Affected
 
-Check:
+WindowAutoLayout does not register a global hotkey, raw mouse/keyboard device events, or low-level input hooks. Automatic restore is event-driven and has no recurring scan interval.
 
-- hotkey is enabled in Settings
-- the accelerator is valid
-- another app is not already using the same hotkey
-- WindowAutoLayout is still running in the tray
+Check Task Manager for exactly one `WindowAutoLayout.exe` process. Its priority should be Below normal, and CPU should stay at or near zero while idle. Disable automatic restore temporarily to separate a shell-triggered restore from unrelated game behavior.
 
-Try changing the hotkey, saving, then changing it back.
+When the interface is closed, there should be no `msedgewebview2.exe` child owned by WindowAutoLayout. Reopening the interface creates WebView2 on demand; closing to tray removes it again.
+
+Automatic restore is skipped whenever a known game or any fullscreen foreground window is active. If a restore was already waiting to run, returning to the game cancels it.
 
 ## Startup Restore Does Not Run
 
@@ -152,7 +180,7 @@ npm run check
 cd src-tauri
 cargo fmt --check
 cargo check
-cargo test
+cargo test --all-targets
 cargo clippy --all-targets -- -D warnings
 cd ..
 npm audit --audit-level=moderate

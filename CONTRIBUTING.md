@@ -34,7 +34,8 @@ powershell -ExecutionPolicy Bypass -File scripts\install-current.ps1 -SkipBuild
 
 - Keep Win32 calls inside the Rust backend.
 - Avoid permanent busy loops.
-- Clamp polling intervals for lock/restore behavior.
+- Prefer blocking Windows events over recurring polling for background behavior.
+- Do not add global mouse hooks, keyboard hooks, raw-input listeners, or synthetic input.
 - Treat hidden tray windows, minimized windows, and delayed windows as normal cases.
 - Return clear errors to the UI instead of panicking.
 - Keep matching conservative enough to avoid tool windows and helper windows.

@@ -11,7 +11,7 @@ WindowAutoLayout is built around one idea: save a workspace once, then bring it 
 | Layout | The saved X, Y, width, and height for an app window |
 | Target monitor | The monitor where the saved layout should land |
 | Restore | The action that launches missing apps, finds windows, and moves them |
-| Layout lock | A temporary keep-in-place mode that restores a profile when managed windows change |
+| Automatic restore | An event-driven guard that recovers a profile after Show Desktop or leaving a fullscreen app |
 
 ## First Setup
 
@@ -22,9 +22,9 @@ WindowAutoLayout is built around one idea: save a workspace once, then bring it 
 5. Arrange the apps exactly how you want them.
 6. Go to Dashboard, pick the monitor to capture, and press Capture current layout.
 7. Fine-tune any app entry in Apps or any single window in Layout if needed.
-8. Press Restore.
+8. Press Restore windows now.
 
-Once that works, enable startup restore or use the tray menu and hotkey.
+Once that works, enable startup restore or use the tray menu.
 
 ## Profiles
 
@@ -36,7 +36,7 @@ A profile groups apps together. A typical streaming profile might include:
 - Stream music app
 - Chat or moderation tool
 
-Profiles can have their own target monitor. If an app entry also has a target monitor, the app entry wins for that app.
+Profiles can have their own target monitor. If an app entry also has a target monitor, the app entry wins for that app. New captures store a hardware-backed monitor identity, so Windows renumbering `DISPLAY1` and `DISPLAY2` does not silently retarget a saved workspace.
 
 ## App Entries
 
@@ -63,7 +63,7 @@ For most apps, process name plus saved layout is enough.
 
 Use Layout when you want full control over which real window belongs to an app entry.
 
-Use Dashboard capture when the visible windows on one monitor should become the current profile. Capture sets the profile target monitor, replaces that profile's app list with the visible windows on the selected monitor, and saves their monitor-relative positions.
+Use Dashboard capture when the visible windows on one monitor should become the current profile. Capture sets the profile target monitor, replaces that profile's app list with the visible windows on the selected monitor, and saves their monitor-relative physical-pixel positions. It also records the display resolution, usable work area, and scale so the layout can adapt if that display changes later.
 
 Good save flow:
 
@@ -81,11 +81,27 @@ Restore works in this order:
 1. Finds matching visible, minimized, or hidden windows according to the app settings.
 2. Pulls hidden or minimized windows forward when allowed.
 3. Starts missing apps when launching is enabled.
-4. Waits for delayed main windows to appear.
+4. Waits past small launch or updater splash windows for the real main surface.
 5. Applies the saved layout.
-6. Logs success, skip, launch, match, and error details.
+6. Rechecks normal windows until the saved bounds hold across two geometry reads.
+7. Logs success, skip, launch, match, and error details.
 
 If an app is running but no usable window appears, restore reports that instead of silently pretending it worked.
+
+`Launch apps that are closed` only controls new process launches. An existing minimized or tray-hidden app can still be recovered when that setting is off.
+
+## Tray Controls
+
+Right-click the tray icon to restore immediately, see whether automatic restore is on, open the app, open the activity log, or exit. The restore and automatic items are disabled while a restore is already running.
+
+Settings controls what a normal left-click does:
+
+- `Open WindowAutoLayout` shows the existing app window.
+- `Restore windows now` triggers the default profile without opening the app.
+
+The tray text, tooltip, and app header all use the same runtime status, so they cannot silently disagree about whether automatic restore is active.
+
+Closing the visible interface to tray unloads its WebView processes. The native tray process stays resident and can still restore, toggle automatic recovery, or reopen the interface.
 
 ## OBS Setup
 
@@ -97,11 +113,14 @@ Recommended OBS app entry:
 | Pull hidden/tray windows | On |
 | Wake running tray apps | On |
 | Restore if minimized | On |
-| Launch if missing | On |
 | Detection timeout | At least 25 seconds |
 | Retry interval | Around 700 ms |
 
-OBS tray behavior is special. When OBS is hidden in the system tray, Windows may expose only helper windows or no normal main window. WindowAutoLayout asks OBS through its Qt tray icon message window before moving it, which matches the manual tray click path and gives OBS time to repaint.
+OBS tray behavior is special. When OBS is hidden in the system tray, Windows may expose only helper windows or no normal main window. WindowAutoLayout asks OBS through its Qt tray icon message window, waits for the main window, applies the saved rectangle, and verifies a real minimize/restore transition so Qt presents the rebuilt interface.
+
+OpenLaunchDeck can start with Windows in `--background` mode. During a restore, WindowAutoLayout launches the saved OpenLaunchDeck executable with `--show`. OpenLaunchDeck hands that request to its existing single instance, restores the tray window, and exits the short-lived helper process.
+
+Every restored window receives a non-activating, one-shot surface refresh after it is shown or moved. This asks toolkits such as Qt and Electron to redraw newly exposed client areas without synthetic input or background repaint polling. OBS uses the additional bounded recovery above and returns to the previous window when focus stayed on OBS during that recovery.
 
 ## Discord Setup
 
@@ -118,11 +137,11 @@ Discord can take a moment to expose its main Electron window after launch. Keep 
 
 ## Startup Restore
 
-Startup restore is controlled from Settings and Profiles.
+Startup restore is controlled from Settings, with the default profile selected under Profiles.
 
 Settings control whether WindowAutoLayout starts with Windows, whether it starts minimized to tray, how long it waits, and whether it restores on launch.
 
-Profiles control which profile is the default startup profile and whether that profile participates in startup restore.
+Profiles control which profile is the default startup profile.
 
 The startup command is stored in the current user's Run key:
 
@@ -132,28 +151,19 @@ The startup command is stored in the current user's Run key:
 
 No admin rights are required for normal startup registration.
 
-## Layout Lock
+## Automatic Restore
 
-Layout lock is for keeping a live workspace in place.
+Automatic restore is for recovering a workspace from shell actions without continuous background work.
 
-When enabled, WindowAutoLayout watches the selected profile and restores only when a managed window changes. That means:
+When enabled:
 
-- Show Desktop gets corrected while the lock is active.
-- Accidentally dragged windows snap back.
-- Minimized matching windows get pulled back if the app settings allow it.
-- The app keeps watching the selected profile until the lock is disabled or the lock duration ends.
+- Show Desktop triggers a restore of already-running profile windows when its setting is enabled.
+- Leaving a game or fullscreen app triggers a delayed restore when its setting is enabled.
+- Returning to a game before restore begins cancels the background restore.
+- Automatic restore never launches a missing app or forces keyboard focus.
+- No window scan runs on a timer while the desktop is idle.
 
-The lock interval is clamped internally to 2-5 seconds. If a fullscreen app that is not part of the profile is foreground, WindowAutoLayout pauses lock work longer so games are not polled hard.
-
-## Hotkey
-
-The default hotkey is:
-
-```text
-Ctrl+Alt+L
-```
-
-When enabled, the hotkey restores the selected/default profile. If restore-without-opening is enabled, the main WindowAutoLayout window does not need to pop open.
+Use the Dashboard Restore button or tray Restore command when missing apps also need to launch.
 
 ## Config And Logs
 
@@ -163,7 +173,7 @@ User config and logs are stored under:
 %APPDATA%\com.rique.windowautolayout
 ```
 
-The config is JSON and can be imported or exported from Settings. If the config becomes unreadable, WindowAutoLayout backs it up and starts from a fresh default config.
+The config is JSON and can be imported or exported from Settings. Imports are parsed and normalized by the Rust backend before the interface uses them. If the config becomes unreadable, WindowAutoLayout backs it up and starts from a fresh default config.
 
 ## Everyday Streaming Flow
 
@@ -174,4 +184,4 @@ The config is JSON and can be imported or exported from Settings. If the config 
 5. Missing apps open.
 6. Tray apps are pulled forward.
 7. The selected streaming profile is restored.
-8. Layout lock keeps the workspace stable if enabled.
+8. Automatic restore recovers the workspace after relevant shell events if enabled.

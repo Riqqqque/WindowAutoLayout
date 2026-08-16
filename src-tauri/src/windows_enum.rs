@@ -1,4 +1,4 @@
-use std::ffi::c_void;
+use std::{collections::HashMap, ffi::c_void};
 
 use windows::{
     core::BOOL,
@@ -7,7 +7,7 @@ use windows::{
         Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS},
         UI::WindowsAndMessaging::{
             EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowRect, GetWindowTextLengthW,
-            GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
+            GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, IsZoomed,
         },
     },
 };
@@ -15,15 +15,28 @@ use windows::{
 use crate::{
     errors::{AppError, AppResult},
     models::WindowInfo,
-    monitors,
-    processes::{query_process_name, query_process_path},
+    monitors, processes,
 };
 
 pub fn list_windows_with_hidden(include_hidden: bool) -> AppResult<Vec<WindowInfo>> {
+    list_windows_with_options(include_hidden, true)
+}
+
+fn list_windows_with_options(
+    include_hidden: bool,
+    include_executable_path: bool,
+) -> AppResult<Vec<WindowInfo>> {
     let mut windows: Vec<WindowInfo> = Vec::new();
+    let process_names = processes::list_processes()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|process| (process.pid, process.name))
+        .collect::<HashMap<_, _>>();
     let mut context = EnumWindowsContext {
         windows: &mut windows,
+        process_names: &process_names,
         include_hidden,
+        include_executable_path,
     };
     let lparam = LPARAM(&mut context as *mut EnumWindowsContext as isize);
     let ok = unsafe { EnumWindows(Some(enum_window_proc), lparam) };
@@ -41,21 +54,36 @@ pub fn list_windows_with_hidden(include_hidden: bool) -> AppResult<Vec<WindowInf
 
 pub fn foreground_window() -> Option<WindowInfo> {
     let hwnd = unsafe { GetForegroundWindow() };
-    window_info_from_handle(hwnd)
+    window_info_from_handle_lightweight(hwnd)
 }
 
 struct EnumWindowsContext<'a> {
     windows: &'a mut Vec<WindowInfo>,
+    process_names: &'a HashMap<u32, String>,
     include_hidden: bool,
+    include_executable_path: bool,
 }
 
 pub fn window_info_from_handle(hwnd: HWND) -> Option<WindowInfo> {
+    window_info_from_handle_with_cache(hwnd, None, true)
+}
+
+pub fn window_info_from_handle_lightweight(hwnd: HWND) -> Option<WindowInfo> {
+    window_info_from_handle_with_cache(hwnd, None, false)
+}
+
+fn window_info_from_handle_with_cache(
+    hwnd: HWND,
+    process_names: Option<&HashMap<u32, String>>,
+    include_executable_path: bool,
+) -> Option<WindowInfo> {
     if hwnd.0.is_null() {
         return None;
     }
 
     let visible = unsafe { IsWindowVisible(hwnd).as_bool() };
     let minimized = unsafe { IsIconic(hwnd).as_bool() };
+    let maximized = unsafe { IsZoomed(hwnd).as_bool() };
     let rect = window_rect(hwnd)?;
     let width = rect.right - rect.left;
     let height = rect.bottom - rect.top;
@@ -70,8 +98,19 @@ pub fn window_info_from_handle(hwnd: HWND) -> Option<WindowInfo> {
 
     let title = window_text(hwnd);
     let class_name = class_name(hwnd);
-    let process_name = query_process_name(pid);
-    let executable_path = query_process_path(pid);
+    let executable_path = if include_executable_path {
+        processes::query_process_path(pid)
+    } else {
+        None
+    };
+    let process_name = process_names
+        .and_then(|names| names.get(&pid).cloned())
+        .or_else(|| {
+            executable_path
+                .as_deref()
+                .and_then(processes::file_name_from_path)
+        })
+        .unwrap_or_else(|| processes::query_process_name(pid));
     let monitor_id = monitors::monitor_for_rect(rect).map(|monitor| monitor.id);
 
     Some(WindowInfo {
@@ -88,6 +127,7 @@ pub fn window_info_from_handle(hwnd: HWND) -> Option<WindowInfo> {
         height,
         is_visible: visible,
         is_minimized: minimized,
+        is_maximized: maximized,
     })
 }
 
@@ -108,7 +148,11 @@ pub fn handle_to_string(hwnd: HWND) -> String {
 unsafe extern "system" fn enum_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
     let context = &mut *(lparam.0 as *mut EnumWindowsContext);
 
-    if let Some(info) = window_info_from_handle(hwnd) {
+    if let Some(info) = window_info_from_handle_with_cache(
+        hwnd,
+        Some(context.process_names),
+        context.include_executable_path,
+    ) {
         if (info.is_visible || context.include_hidden) && !is_shell_or_helper_window(&info) {
             context.windows.push(info);
         }

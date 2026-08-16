@@ -1,5 +1,86 @@
 # Changelog
 
+## 0.1.28
+
+- Added a live tray command named `Restore windows now`, a checked automatic-restore status item, and an optional restore-on-left-click tray action.
+- Added persistent restore and automatic-state controls to every app view, with tray and window state kept in sync while a restore is running.
+- Added separate settings for Show Desktop recovery, post-game recovery, launching closed apps, and tray left-click behavior.
+- Saved display resolution, work area, and scale metadata with each captured window so layouts adapt cleanly to resolution or taskbar changes while staying exact on unchanged displays.
+- Replaced volatile `DISPLAY1` and `DISPLAY2` targets with hardware-backed monitor identities, including a guarded migration for layouts saved before Windows reordered display names.
+- Added bounded placement verification with repeated geometry checks, one-pixel tolerance, and clear expected-versus-actual failures when another app refuses its saved bounds.
+- Waited past undersized launch and update splash windows before placing the real app surface, preventing late startup windows from reclaiming old bounds.
+- Kept already-running minimized or tray-hidden apps recoverable when launching closed apps is disabled, and made startup restore honor that preference.
+- Made restore and capture results independent of optional log-file writes, tightened imported display metadata, and made layout-lock state changes transactional.
+- Kept the WebView unloaded in tray-only mode and destroyed it when the interface closes, leaving one low-priority native process with no idle polling.
+- Updated the interface, newest-first activity log, documentation screenshot, frontend dependencies, and release checks; frontend and Rust advisory scans report no known vulnerabilities.
+
+## 0.1.26
+
+- Limited OBS tray activation to truly hidden windows so a minimized OBS window is never toggled back into the tray.
+- Added an ordered OBS repaint with a one-shot client-surface check and one non-minimizing retry when the title bar appears but the Qt interface is still blank.
+- Prevented restore-generated window events from feeding back into the event-driven layout lock and stopped generic window restores from minimizing windows as a side effect.
+
+## 0.1.25
+
+- Made background restores show windows asynchronously without activating them or waiting on another app's UI thread.
+- Added a shared renderer refresh for restored windows, including windows that already match their saved rectangle after leaving the tray.
+- Replaced synchronous forced paints with a one-shot resize and queued full-surface repaint, preventing blank client areas without adding idle work.
+- Routed minimized OBS windows through OBS's native Qt tray restore handler before using the generic Win32 fallback.
+- Added a bounded, state-verified OBS minimize/restore recovery so Qt rebuilds and presents its docks instead of leaving a white client area.
+- Blocked OBS presentation recovery while a game or fullscreen app is foreground and restored the previous window only when focus stayed on OBS during the pulse.
+
+## 0.1.24
+
+- Made OpenLaunchDeck restores use its supported `--show` single-instance command, so a startup tray process exposes the existing window without creating a duplicate.
+- Removed OpenLaunchDeck background-only arguments during a layout restore while preserving unrelated custom launch arguments.
+- Added a no-focus Qt relayout and full child repaint after OBS is moved, returning it to the exact saved rectangle before the restore completes.
+
+## 0.1.23
+
+- Serialized restore requests so startup, tray, dashboard, and event-lock restores cannot move the same windows at the same time.
+- Reported restores paused by a foreground game as paused instead of success, and kept the event guard ready to retry after the game exits.
+- Preserved maximized state when capturing layouts and constrained oversized saved bounds after monitor resolution changes.
+- Made nearest-monitor fallback compare the saved profile canvas against every connected display.
+- Added safe config import parsing, schema normalization, duplicate-ID repair, regex validation, and bounds for imported delays and rectangles.
+- Made a second launch bring the existing tray app forward and made the close-button setting exit cleanly when tray hiding is disabled.
+- Removed settings that did not affect runtime behavior and made fullscreen game protection unconditional.
+- Isolated page scrolling inside the app shell, reset scroll position between views, and added an interface recovery screen.
+
+## 0.1.22
+
+- Removed the global hotkey and disabled Tauri raw mouse and keyboard device events, so WindowAutoLayout no longer registers for background input.
+- Replaced the five-second layout-lock poller with a blocking Windows event guard for Show Desktop and game-to-desktop transitions.
+- Prevented automatic and startup restores from forcing window focus or synthesizing keyboard input.
+- Added mid-restore game checks so background work stops if a game or fullscreen app becomes active.
+- Coalesced restore events through one low-priority worker instead of creating a thread for every shell event.
+- Tightened the Tauri content security policy and removed the unused opener plugin.
+- Kept Microsoft Store app profiles working across versioned WindowsApps folder and executable-name changes.
+- Redesigned the dashboard, layout editor, app editor, settings, profiles, and logs around a denser desktop control surface.
+
+## 0.1.21
+
+- Added an event-driven desktop guard that restores already-running profile windows after Show Desktop or after leaving a latency-sensitive game.
+- Kept the guard idle while games such as Valorant are foreground and restored without launching missing apps.
+- Left the installed app running after local installs instead of closing the smoke-launch process.
+- Prevented duplicate tray processes with a named single-instance guard.
+- Accepted BOM-marked config files so a valid config is not replaced with defaults.
+- Kept startup registration pointed at `WindowAutoLayout.exe --startup-restore` so the tray app comes back on Windows login.
+
+## 0.1.20
+
+- Started the app hidden during startup restore so no WindowAutoLayout window is created on-screen before tray mode.
+- Lowered WindowAutoLayout process priority and the layout-lock worker thread priority so the game scheduler wins.
+- Raised layout-lock polling to a 5-30 second range and paused it for 60 seconds while Valorant or another latency-sensitive game is foreground.
+- Treated tray-only OpenLaunchDeck as a clean no-op instead of relaunching it or marking the restore partial.
+- Kept the exact-placement and low-CPU restore fixes from 0.1.19.
+
+## 0.1.19
+
+- Restored normal windows after unmaximizing before the final move, so Windows does not undo the saved bounds.
+- Rechecked restored windows and retried the saved rectangle once if Windows reported drift after the move.
+- Kept stale or off-screen saved layouts on the target monitor while preserving exact saved bounds when they still touch the monitor.
+- Made Capture Current Layout use the window's real monitor, falling back to its center point only when Windows does not report a monitor.
+
 ## 0.1.18
 
 - Cut layout lock CPU use by only running full restore work when managed windows actually change.

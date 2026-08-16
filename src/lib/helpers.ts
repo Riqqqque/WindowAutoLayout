@@ -1,4 +1,4 @@
-import type { AppConfig, LayoutRect, MonitorInfo, Profile, WindowAutoLayoutConfig } from "./types";
+import type { AppConfig, CapturedDisplay, LayoutRect, MonitorInfo, Profile, WindowAutoLayoutConfig } from "./types";
 
 export function newId(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
@@ -40,26 +40,62 @@ export function monitorLabel(monitor?: MonitorInfo | null) {
   return `${monitor.name} ${monitor.width}x${monitor.height}${monitor.isPrimary ? " primary" : ""}`;
 }
 
+export function capturedDisplayForMonitor(monitor: MonitorInfo): CapturedDisplay {
+  return {
+    width: monitor.width,
+    height: monitor.height,
+    workX: monitor.workX - monitor.x,
+    workY: monitor.workY - monitor.y,
+    workWidth: monitor.workWidth,
+    workHeight: monitor.workHeight,
+    scalePercent: Math.round(monitor.scaleFactor * 100),
+  };
+}
+
 export function resolveMonitor(
   monitors: MonitorInfo[],
   preferredId?: string | null,
   fallbackMode: WindowAutoLayoutConfig["global"]["monitorMissingBehavior"] = "nearestMatch",
+  targetSize?: { width: number; height: number },
 ) {
   if (preferredId) {
     const exact = monitors.find((monitor) => monitor.id === preferredId);
     if (exact) return { monitor: exact, isFallback: false };
-    if (fallbackMode === "doNothing" || fallbackMode === "askNextOpen") return { monitor: null, isFallback: false };
+    if (fallbackMode === "doNothing") return { monitor: null, isFallback: false };
   }
 
   const fallback =
     fallbackMode === "usePrimary"
       ? monitors.find((monitor) => monitor.isPrimary)
-      : monitors.find((monitor) => !monitor.isPrimary) ?? monitors.find((monitor) => monitor.isPrimary);
+      : targetSize
+        ? [...monitors].sort((left, right) => {
+            const leftScore = Math.abs(left.width - targetSize.width) + Math.abs(left.height - targetSize.height);
+            const rightScore = Math.abs(right.width - targetSize.width) + Math.abs(right.height - targetSize.height);
+            return leftScore - rightScore || Number(left.isPrimary) - Number(right.isPrimary);
+          })[0]
+        : monitors.find((monitor) => monitor.isPrimary) ?? monitors[0];
   return { monitor: fallback ?? null, isFallback: Boolean(preferredId && fallback) };
 }
 
 export function resolveProfileMonitor(config: WindowAutoLayoutConfig, profile: Profile, monitors: MonitorInfo[]) {
-  return resolveMonitor(monitors, profile.targetMonitorId ?? config.global.defaultMonitorId, config.global.monitorMissingBehavior);
+  const bounds = profile.apps.reduce(
+    (current, app) => ({
+      left: Math.min(current.left, app.layout.x),
+      top: Math.min(current.top, app.layout.y),
+      right: Math.max(current.right, app.layout.x + app.layout.width),
+      bottom: Math.max(current.bottom, app.layout.y + app.layout.height),
+    }),
+    { left: 0, top: 0, right: 0, bottom: 0 },
+  );
+  const targetSize = profile.apps.length
+    ? { width: bounds.right - bounds.left, height: bounds.bottom - bounds.top }
+    : undefined;
+  return resolveMonitor(
+    monitors,
+    profile.targetMonitorId ?? config.global.defaultMonitorId,
+    config.global.monitorMissingBehavior,
+    targetSize,
+  );
 }
 
 export function clampRect(rect: LayoutRect, monitor?: MonitorInfo | null): LayoutRect {

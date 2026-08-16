@@ -1,17 +1,26 @@
-use std::{thread, time::Duration};
+use std::{
+    ffi::c_void,
+    thread,
+    time::{Duration, Instant},
+};
 
 use windows::{
     core::BOOL,
     Win32::{
         Foundation::{GetLastError, HWND, LPARAM, RECT, WPARAM},
-        Graphics::Gdi::{
-            RedrawWindow, UpdateWindow, RDW_ALLCHILDREN, RDW_FRAME, RDW_INVALIDATE, RDW_UPDATENOW,
+        Graphics::{
+            Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS},
+            Gdi::{
+                GetDC, GetPixel, InvalidateRect, RedrawWindow, ReleaseDC, CLR_INVALID,
+                RDW_ALLCHILDREN, RDW_FRAME, RDW_INTERNALPAINT, RDW_INVALIDATE, RDW_UPDATENOW,
+            },
         },
         UI::WindowsAndMessaging::{
-            BringWindowToTop, EnumWindows, GetClassNameW, GetWindowTextW, GetWindowThreadProcessId,
-            IsIconic, PostMessageW, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_TOP,
-            SWP_NOACTIVATE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE,
-            SW_SHOW, WM_APP,
+            BringWindowToTop, EnumWindows, GetClassNameW, GetClientRect, GetForegroundWindow,
+            GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow,
+            IsWindowVisible, IsZoomed, PostMessageW, SetForegroundWindow, SetWindowPos,
+            ShowWindowAsync, HWND_TOP, SC_MAXIMIZE, SWP_NOACTIVATE, SWP_NOZORDER, SWP_SHOWWINDOW,
+            SW_RESTORE, SW_SHOWMINNOACTIVE, SW_SHOWNOACTIVATE, WM_APP, WM_SYSCOMMAND,
         },
     },
 };
@@ -19,6 +28,7 @@ use windows::{
 use crate::{
     errors::{AppError, AppResult},
     models::{LayoutRect, MonitorInfo, WindowStatePreference},
+    performance,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -34,25 +44,30 @@ pub fn apply_layout(
 ) -> AppResult<()> {
     let should_show =
         pull_hidden_window || (restore_if_minimized && unsafe { IsIconic(hwnd).as_bool() });
+    let should_unmaximize =
+        !matches!(state, WindowStatePreference::Minimized) && unsafe { IsZoomed(hwnd).as_bool() };
     if should_show {
         show_window_for_restore(hwnd);
+    } else if should_unmaximize {
+        unsafe {
+            let _ = ShowWindowAsync(hwnd, SW_SHOWNOACTIVATE);
+        }
+        thread::sleep(Duration::from_millis(120));
     }
 
-    let rect = absolute_rect(monitor, layout);
+    let frame_rect = absolute_rect(monitor, layout);
+    let window_rect = rect_for_set_window_pos(hwnd, frame_rect);
     let width = if force_resize {
-        rect.right - rect.left
+        window_rect.right - window_rect.left
     } else {
         0
     };
     let height = if force_resize {
-        rect.bottom - rect.top
+        window_rect.bottom - window_rect.top
     } else {
         0
     };
-    let mut flags = SWP_SHOWWINDOW;
-    if !activate_after_show {
-        flags |= SWP_NOZORDER | SWP_NOACTIVATE;
-    }
+    let mut flags = SWP_SHOWWINDOW | SWP_NOZORDER | SWP_NOACTIVATE;
     if !force_resize {
         flags |= windows::Win32::UI::WindowsAndMessaging::SWP_NOSIZE;
     }
@@ -61,8 +76,8 @@ pub fn apply_layout(
         SetWindowPos(
             hwnd,
             Some(HWND_TOP),
-            rect.left,
-            rect.top,
+            window_rect.left,
+            window_rect.top,
             width,
             height,
             flags,
@@ -78,20 +93,26 @@ pub fn apply_layout(
 
     unsafe {
         match state {
-            WindowStatePreference::Normal => {
-                let _ = ShowWindow(hwnd, SW_RESTORE);
-            }
+            WindowStatePreference::Normal => {}
             WindowStatePreference::Maximized => {
-                let _ = ShowWindow(hwnd, SW_MAXIMIZE);
+                let _ = PostMessageW(
+                    Some(hwnd),
+                    WM_SYSCOMMAND,
+                    WPARAM(SC_MAXIMIZE as usize),
+                    LPARAM(0),
+                );
             }
             WindowStatePreference::Minimized => {
-                let _ = ShowWindow(hwnd, SW_MINIMIZE);
+                let _ = ShowWindowAsync(hwnd, SW_SHOWMINNOACTIVE);
             }
         };
     }
 
+    if !matches!(state, WindowStatePreference::Minimized) {
+        refresh_window_surface(hwnd);
+    }
     if activate_after_show {
-        wake_painted_window(hwnd);
+        activate_window(hwnd);
     }
 
     Ok(())
@@ -99,11 +120,134 @@ pub fn apply_layout(
 
 pub fn show_window_for_restore(hwnd: HWND) {
     unsafe {
-        let _ = ShowWindow(hwnd, SW_RESTORE);
-        let _ = ShowWindow(hwnd, SW_SHOW);
+        let command = if IsIconic(hwnd).as_bool() {
+            SW_RESTORE
+        } else {
+            SW_SHOWNOACTIVATE
+        };
+        let _ = ShowWindowAsync(hwnd, command);
     }
-    thread::sleep(Duration::from_millis(120));
-    wake_painted_window(hwnd);
+    thread::sleep(Duration::from_millis(160));
+    refresh_window_surface(hwnd);
+}
+
+pub fn refresh_window_surface(hwnd: HWND) {
+    queue_full_repaint(hwnd, true);
+}
+
+pub fn foreground_window() -> HWND {
+    unsafe { GetForegroundWindow() }
+}
+
+pub fn wake_renderer_after_restore(hwnd: HWND, keep_active: bool, previous: HWND) -> bool {
+    if performance::foreground_is_latency_sensitive() {
+        return false;
+    }
+
+    show_window_for_restore(hwnd);
+    if performance::foreground_is_latency_sensitive() {
+        return false;
+    }
+    activate_window(hwnd);
+    let mut surface_ready = wait_for_client_surface(hwnd, Duration::from_secs(2));
+    if !surface_ready && !performance::foreground_is_latency_sensitive() {
+        refresh_window_surface(hwnd);
+        activate_window(hwnd);
+        surface_ready = wait_for_client_surface(hwnd, Duration::from_secs(2));
+    }
+
+    let current = unsafe { GetForegroundWindow() };
+    if !keep_active
+        && previous != hwnd
+        && current == hwnd
+        && !previous.0.is_null()
+        && unsafe { IsWindow(Some(previous)).as_bool() }
+    {
+        activate_window(previous);
+    }
+    surface_ready
+}
+
+fn wait_for_client_surface(hwnd: HWND, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if window_is_visible_and_restored(hwnd) {
+            match client_surface_is_blank(hwnd) {
+                Some(false) => return true,
+                None => {
+                    thread::sleep(Duration::from_millis(250));
+                    return true;
+                }
+                Some(true) => {}
+            }
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn window_is_visible_and_restored(hwnd: HWND) -> bool {
+    unsafe {
+        IsWindow(Some(hwnd)).as_bool()
+            && IsWindowVisible(hwnd).as_bool()
+            && !IsIconic(hwnd).as_bool()
+    }
+}
+
+fn client_surface_is_blank(hwnd: HWND) -> Option<bool> {
+    let mut rect = RECT::default();
+    if unsafe { GetClientRect(hwnd, &mut rect) }.is_err() {
+        return None;
+    }
+    let width = rect.right.saturating_sub(rect.left);
+    let height = rect.bottom.saturating_sub(rect.top);
+    if width < 80 || height < 80 {
+        return None;
+    }
+
+    let dc = unsafe { GetDC(Some(hwnd)) };
+    if dc.0.is_null() {
+        return None;
+    }
+    let points = [
+        (width / 4, 8),
+        (width / 2, 8),
+        (width * 3 / 4, 8),
+        (width / 6, height - 12),
+        (width / 2, height - 12),
+        (width * 5 / 6, height - 12),
+        (12, height / 2),
+        (width - 12, height / 2),
+    ];
+    let samples = points
+        .into_iter()
+        .map(|(x, y)| unsafe { GetPixel(dc, x, y) })
+        .collect::<Vec<_>>();
+    unsafe {
+        ReleaseDC(Some(hwnd), dc);
+    }
+    surface_samples_are_blank(&samples)
+}
+
+fn surface_samples_are_blank(samples: &[windows::Win32::Foundation::COLORREF]) -> Option<bool> {
+    let valid = samples
+        .iter()
+        .filter(|color| color.0 != CLR_INVALID)
+        .copied()
+        .collect::<Vec<_>>();
+    if valid.len() < 4 {
+        return None;
+    }
+    let white = valid
+        .iter()
+        .filter(|color| {
+            let value = color.0;
+            value & 0xff >= 245 && (value >> 8) & 0xff >= 245 && (value >> 16) & 0xff >= 245
+        })
+        .count();
+    Some(white * 4 >= valid.len() * 3)
 }
 
 pub fn activate_qt_tray_icon_for_process(process_id: u32) -> bool {
@@ -132,27 +276,25 @@ pub fn activate_qt_tray_icon_for_process(process_id: u32) -> bool {
     sent
 }
 
-fn wake_painted_window(hwnd: HWND) {
+fn activate_window(hwnd: HWND) {
+    if performance::foreground_is_latency_sensitive() {
+        return;
+    }
     unsafe {
         let _ = BringWindowToTop(hwnd);
         let _ = SetForegroundWindow(hwnd);
-        let _ = RedrawWindow(
-            Some(hwnd),
-            None,
-            None,
-            RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN | RDW_FRAME,
-        );
-        let _ = UpdateWindow(hwnd);
     }
-    thread::sleep(Duration::from_millis(120));
+    queue_full_repaint(hwnd, false);
+}
+
+fn queue_full_repaint(hwnd: HWND, update_now: bool) {
+    let mut flags = RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_FRAME | RDW_INTERNALPAINT;
+    if update_now {
+        flags |= RDW_UPDATENOW;
+    }
     unsafe {
-        let _ = RedrawWindow(
-            Some(hwnd),
-            None,
-            None,
-            RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN | RDW_FRAME,
-        );
-        let _ = UpdateWindow(hwnd);
+        let _ = InvalidateRect(Some(hwnd), None, false);
+        let _ = RedrawWindow(Some(hwnd), None, None, flags);
     }
 }
 
@@ -201,6 +343,76 @@ fn window_title(hwnd: HWND) -> String {
 
 fn nin_select_message() -> u32 {
     0x0400
+}
+
+fn rect_for_set_window_pos(hwnd: HWND, target_frame_rect: RECT) -> RECT {
+    window_frame_margins(hwnd)
+        .map(|margins| adjust_rect_for_frame_margins(target_frame_rect, margins))
+        .unwrap_or(target_frame_rect)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FrameMargins {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+fn window_frame_margins(hwnd: HWND) -> Option<FrameMargins> {
+    let mut outer = RECT::default();
+    let outer_ok = unsafe { GetWindowRect(hwnd, &mut outer) };
+    if outer_ok.is_err() {
+        return None;
+    }
+
+    let mut frame = RECT::default();
+    let frame_ok = unsafe {
+        DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            &mut frame as *mut RECT as *mut c_void,
+            std::mem::size_of::<RECT>() as u32,
+        )
+    };
+    if frame_ok.is_err() {
+        return None;
+    }
+
+    if outer.right <= outer.left
+        || outer.bottom <= outer.top
+        || frame.right <= frame.left
+        || frame.bottom <= frame.top
+    {
+        return None;
+    }
+
+    let margins = FrameMargins {
+        left: frame.left - outer.left,
+        top: frame.top - outer.top,
+        right: outer.right - frame.right,
+        bottom: outer.bottom - frame.bottom,
+    };
+    let values = [margins.left, margins.top, margins.right, margins.bottom];
+    if values
+        .iter()
+        .any(|value| *value < 0 || *value > MAX_FRAME_MARGIN_PX)
+    {
+        return None;
+    }
+
+    Some(margins)
+}
+
+const MAX_FRAME_MARGIN_PX: i32 = 128;
+
+fn adjust_rect_for_frame_margins(target_frame_rect: RECT, margins: FrameMargins) -> RECT {
+    RECT {
+        left: target_frame_rect.left - margins.left,
+        top: target_frame_rect.top - margins.top,
+        right: target_frame_rect.right + margins.right,
+        bottom: target_frame_rect.bottom + margins.bottom,
+    }
 }
 
 pub fn absolute_rect(monitor: &MonitorInfo, layout: &LayoutRect) -> RECT {
@@ -252,5 +464,52 @@ mod tests {
         let rect = absolute_rect(&monitor, &layout);
         assert_eq!(rect.left, -1820);
         assert_eq!(relative_rect(&monitor, rect), layout);
+    }
+
+    #[test]
+    fn adjusts_saved_frame_rect_to_outer_window_rect() {
+        let target = RECT {
+            left: -3061,
+            top: -244,
+            right: -1167,
+            bottom: 815,
+        };
+        let adjusted = adjust_rect_for_frame_margins(
+            target,
+            FrameMargins {
+                left: 9,
+                top: 0,
+                right: 9,
+                bottom: 9,
+            },
+        );
+
+        assert_eq!(adjusted.left, -3070);
+        assert_eq!(adjusted.top, -244);
+        assert_eq!(adjusted.right, -1158);
+        assert_eq!(adjusted.bottom, 824);
+    }
+
+    #[test]
+    fn recognizes_uniform_white_client_samples() {
+        let samples = vec![windows::Win32::Foundation::COLORREF(0x00ff_ffff); 8];
+
+        assert_eq!(surface_samples_are_blank(&samples), Some(true));
+    }
+
+    #[test]
+    fn recognizes_a_painted_client_surface() {
+        let samples = vec![
+            windows::Win32::Foundation::COLORREF(0x00ff_ffff),
+            windows::Win32::Foundation::COLORREF(0x0018_1818),
+            windows::Win32::Foundation::COLORREF(0x0024_2424),
+            windows::Win32::Foundation::COLORREF(0x0030_3030),
+            windows::Win32::Foundation::COLORREF(0x00ff_ffff),
+            windows::Win32::Foundation::COLORREF(0x0010_1010),
+            windows::Win32::Foundation::COLORREF(0x0020_2020),
+            windows::Win32::Foundation::COLORREF(0x0030_3030),
+        ];
+
+        assert_eq!(surface_samples_are_blank(&samples), Some(false));
     }
 }

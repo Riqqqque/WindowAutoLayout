@@ -1,15 +1,15 @@
 use serde::{Deserialize, Serialize};
 
-pub const CONFIG_SCHEMA_VERSION: u32 = 3;
+pub const CONFIG_SCHEMA_VERSION: u32 = 7;
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum MonitorMissingBehavior {
+    #[serde(alias = "askNextOpen")]
     DoNothing,
     UsePrimary,
     NearestMatch,
-    AskNextOpen,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -35,6 +35,7 @@ pub enum TitleMatchMode {
 pub enum RestoreStatus {
     Success,
     PartialSuccess,
+    Paused,
     Failed,
     MonitorMissing,
 }
@@ -44,6 +45,7 @@ pub enum RestoreStatus {
 pub enum AppRestoreStatus {
     Success,
     Skipped,
+    Paused,
     Launched,
     LaunchedWindowNotFound,
     ProcessRunningWindowNotFound,
@@ -62,6 +64,14 @@ pub enum LogSeverity {
     Error,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum TrayClickAction {
+    #[default]
+    OpenWindow,
+    RestoreLayout,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LayoutRect {
@@ -69,6 +79,32 @@ pub struct LayoutRect {
     pub y: i32,
     pub width: i32,
     pub height: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CapturedDisplay {
+    pub width: i32,
+    pub height: i32,
+    pub work_x: i32,
+    pub work_y: i32,
+    pub work_width: i32,
+    pub work_height: i32,
+    pub scale_percent: u32,
+}
+
+impl CapturedDisplay {
+    pub fn from_monitor(monitor: &MonitorInfo) -> Self {
+        Self {
+            width: monitor.width,
+            height: monitor.height,
+            work_x: monitor.work_x - monitor.x,
+            work_y: monitor.work_y - monitor.y,
+            work_width: monitor.work_width,
+            work_height: monitor.work_height,
+            scale_percent: (monitor.scale_factor * 100.0).round().max(1.0) as u32,
+        }
+    }
 }
 
 impl Default for LayoutRect {
@@ -102,12 +138,13 @@ pub struct AppConfig {
     pub title_rule: Option<MatchRule>,
     pub class_name: Option<String>,
     pub target_monitor_id: Option<String>,
+    #[serde(default)]
+    pub captured_display: Option<CapturedDisplay>,
     pub layout: LayoutRect,
     pub window_state: WindowStatePreference,
     pub launch_delay_seconds: u64,
     pub detection_timeout_seconds: u64,
     pub retry_interval_ms: u64,
-    pub launch_if_missing: bool,
     pub move_if_running: bool,
     pub force_resize: bool,
     pub apply_to_all_matching_windows: bool,
@@ -137,12 +174,12 @@ impl AppConfig {
             title_rule: None,
             class_name: None,
             target_monitor_id: None,
+            captured_display: None,
             layout,
             window_state: WindowStatePreference::Normal,
             launch_delay_seconds: 0,
             detection_timeout_seconds: 25,
             retry_interval_ms: 700,
-            launch_if_missing: true,
             move_if_running: true,
             force_resize: true,
             apply_to_all_matching_windows: false,
@@ -167,8 +204,6 @@ pub struct Profile {
     pub description: Option<String>,
     pub target_monitor_id: Option<String>,
     pub apps: Vec<AppConfig>,
-    pub startup_restore: bool,
-    pub enforce_after_restore: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -176,8 +211,6 @@ pub struct Profile {
 pub struct GlobalSettings {
     pub default_monitor_id: Option<String>,
     pub monitor_missing_behavior: MonitorMissingBehavior,
-    pub warn_when_monitor_missing: bool,
-    pub advanced_mode: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -189,22 +222,14 @@ pub struct StartupSettings {
     pub delay_seconds: u64,
     pub restore_on_launch: bool,
     pub launch_missing_apps: bool,
-    pub enforce_after_startup: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TraySettings {
     pub minimize_to_tray_on_close: bool,
-    pub show_restore_status: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct HotkeySettings {
-    pub enabled: bool,
-    pub accelerator: String,
-    pub restore_without_opening: bool,
+    #[serde(default)]
+    pub left_click_action: TrayClickAction,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -213,10 +238,10 @@ pub struct EnforcementSettings {
     pub enabled: bool,
     #[serde(default)]
     pub profile_id: Option<String>,
-    pub duration_seconds: u64,
-    pub interval_ms: u64,
     #[serde(default = "default_true")]
-    pub pause_for_fullscreen_games: bool,
+    pub restore_on_desktop_reveal: bool,
+    #[serde(default = "default_true")]
+    pub restore_after_game_exit: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -227,7 +252,6 @@ pub struct WindowAutoLayoutConfig {
     pub global: GlobalSettings,
     pub startup: StartupSettings,
     pub tray: TraySettings,
-    pub hotkey: HotkeySettings,
     pub enforcement: EnforcementSettings,
     pub profiles: Vec<Profile>,
 }
@@ -266,6 +290,7 @@ pub struct WindowInfo {
     pub height: i32,
     pub is_visible: bool,
     pub is_minimized: bool,
+    pub is_maximized: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -288,6 +313,16 @@ pub struct RestoreResult {
     pub finished_at: String,
     pub monitor: Option<MonitorInfo>,
     pub results: Vec<AppRestoreResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeStatus {
+    pub automatic_restore_enabled: bool,
+    pub automatic_restore_profile_id: Option<String>,
+    pub automatic_restore_profile_name: Option<String>,
+    pub restoring: bool,
+    pub startup_registered: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -349,7 +384,6 @@ pub fn preset_apps() -> Vec<AppConfig> {
         value: "GitHub Desktop".to_string(),
         case_sensitive: false,
     });
-    github_desktop.launch_if_missing = true;
     github_desktop.detection_timeout_seconds = 45;
 
     vec![
@@ -405,8 +439,6 @@ impl Default for WindowAutoLayoutConfig {
             global: GlobalSettings {
                 default_monitor_id: None,
                 monitor_missing_behavior: MonitorMissingBehavior::NearestMatch,
-                warn_when_monitor_missing: true,
-                advanced_mode: false,
             },
             startup: StartupSettings {
                 enabled: false,
@@ -415,23 +447,16 @@ impl Default for WindowAutoLayoutConfig {
                 delay_seconds: 8,
                 restore_on_launch: true,
                 launch_missing_apps: true,
-                enforce_after_startup: true,
             },
             tray: TraySettings {
                 minimize_to_tray_on_close: true,
-                show_restore_status: true,
-            },
-            hotkey: HotkeySettings {
-                enabled: true,
-                accelerator: "Ctrl+Alt+L".to_string(),
-                restore_without_opening: true,
+                left_click_action: TrayClickAction::OpenWindow,
             },
             enforcement: EnforcementSettings {
                 enabled: false,
                 profile_id: Some(default_profile_id.clone()),
-                duration_seconds: 30,
-                interval_ms: 2000,
-                pause_for_fullscreen_games: true,
+                restore_on_desktop_reveal: true,
+                restore_after_game_exit: true,
             },
             profiles: vec![Profile {
                 id: default_profile_id,
@@ -439,8 +464,6 @@ impl Default for WindowAutoLayoutConfig {
                 description: Some("OBS and Discord arranged on a selected monitor.".to_string()),
                 target_monitor_id: None,
                 apps: streaming_apps,
-                startup_restore: true,
-                enforce_after_restore: true,
             }],
         }
     }

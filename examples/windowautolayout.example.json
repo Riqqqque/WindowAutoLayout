@@ -1,11 +1,9 @@
 {
-  "schemaVersion": 3,
-  "appVersion": "0.1.18",
+  "schemaVersion": 7,
+  "appVersion": "0.1.28",
   "global": {
     "defaultMonitorId": null,
-    "monitorMissingBehavior": "nearestMatch",
-    "warnWhenMonitorMissing": true,
-    "advancedMode": false
+    "monitorMissingBehavior": "nearestMatch"
   },
   "startup": {
     "enabled": false,
@@ -13,24 +11,17 @@
     "defaultProfileId": "profile-streaming",
     "delaySeconds": 8,
     "restoreOnLaunch": true,
-    "launchMissingApps": true,
-    "enforceAfterStartup": true
+    "launchMissingApps": true
   },
   "tray": {
     "minimizeToTrayOnClose": true,
-    "showRestoreStatus": true
-  },
-  "hotkey": {
-    "enabled": true,
-    "accelerator": "Ctrl+Alt+L",
-    "restoreWithoutOpening": true
+    "leftClickAction": "openWindow"
   },
   "enforcement": {
     "enabled": false,
     "profileId": "profile-streaming",
-    "durationSeconds": 30,
-    "intervalMs": 2000,
-    "pauseForFullscreenGames": true
+    "restoreOnDesktopReveal": true,
+    "restoreAfterGameExit": true
   },
   "profiles": [
     {
@@ -38,8 +29,6 @@
       "name": "Streaming",
       "description": "OBS and Discord on the selected monitor.",
       "targetMonitorId": null,
-      "startupRestore": true,
-      "enforceAfterRestore": true,
       "apps": [
         {
           "id": "preset-obs",
@@ -51,12 +40,12 @@
           "titleRule": { "mode": "startsWith", "value": "OBS", "caseSensitive": false },
           "className": null,
           "targetMonitorId": null,
+          "capturedDisplay": null,
           "layout": { "x": 0, "y": 0, "width": 1280, "height": 720 },
           "windowState": "normal",
           "launchDelaySeconds": 0,
           "detectionTimeoutSeconds": 25,
           "retryIntervalMs": 700,
-          "launchIfMissing": true,
           "moveIfRunning": true,
           "forceResize": true,
           "applyToAllMatchingWindows": false,
@@ -76,12 +65,12 @@
           "titleRule": null,
           "className": null,
           "targetMonitorId": null,
+          "capturedDisplay": null,
           "layout": { "x": 1280, "y": 0, "width": 640, "height": 720 },
           "windowState": "normal",
           "launchDelaySeconds": 0,
           "detectionTimeoutSeconds": 25,
           "retryIntervalMs": 700,
-          "launchIfMissing": true,
           "moveIfRunning": true,
           "forceResize": true,
           "applyToAllMatchingWindows": false,
@@ -101,12 +90,12 @@
           "titleRule": { "mode": "contains", "value": "GitHub Desktop", "caseSensitive": false },
           "className": null,
           "targetMonitorId": null,
+          "capturedDisplay": null,
           "layout": { "x": 80, "y": 80, "width": 1280, "height": 900 },
           "windowState": "normal",
           "launchDelaySeconds": 0,
           "detectionTimeoutSeconds": 45,
           "retryIntervalMs": 700,
-          "launchIfMissing": true,
           "moveIfRunning": true,
           "forceResize": true,
           "applyToAllMatchingWindows": false,

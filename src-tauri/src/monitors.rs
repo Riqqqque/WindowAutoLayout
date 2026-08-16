@@ -1,12 +1,13 @@
 use windows::{
-    core::BOOL,
+    core::{BOOL, PCWSTR},
     Win32::{
         Foundation::{LPARAM, RECT},
         Graphics::Gdi::{
-            EnumDisplayMonitors, GetMonitorInfoW, MonitorFromRect, HDC, HMONITOR, MONITORINFOEXW,
-            MONITOR_DEFAULTTONEAREST,
+            EnumDisplayDevicesW, EnumDisplayMonitors, GetMonitorInfoW, MonitorFromRect,
+            DISPLAY_DEVICEW, HDC, HMONITOR, MONITORINFOEXW, MONITOR_DEFAULTTONEAREST,
         },
         UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI},
+        UI::WindowsAndMessaging::EDD_GET_DEVICE_INTERFACE_NAME,
     },
 };
 
@@ -33,21 +34,7 @@ pub fn monitor_for_rect(rect: RECT) -> Option<MonitorInfo> {
         return None;
     }
 
-    list_monitors().ok().and_then(|monitors| {
-        monitors
-            .into_iter()
-            .find(|monitor| monitor_matches_handle(monitor, handle))
-    })
-}
-
-fn monitor_matches_handle(monitor: &MonitorInfo, handle: HMONITOR) -> bool {
-    let mut info = MONITORINFOEXW::default();
-    info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
-    let ok = unsafe { GetMonitorInfoW(handle, &mut info as *mut MONITORINFOEXW as *mut _) };
-    if !ok.as_bool() {
-        return false;
-    }
-    monitor.device_name == wide_to_string(&info.szDevice)
+    monitor_info(handle)
 }
 
 unsafe extern "system" fn enum_monitor_proc(
@@ -75,16 +62,13 @@ fn monitor_info(monitor: HMONITOR) -> Option<MonitorInfo> {
     let bounds = info.monitorInfo.rcMonitor;
     let work = info.monitorInfo.rcWork;
     let device_name = wide_to_string(&info.szDevice);
+    let (id, name) = monitor_identity(&device_name, &bounds);
     let is_primary = (info.monitorInfo.dwFlags & 1) == 1;
     let scale_factor = scale_factor_for_monitor(monitor);
 
     Some(MonitorInfo {
-        id: stable_monitor_id(&device_name, &bounds),
-        name: if device_name.is_empty() {
-            "Display".to_string()
-        } else {
-            device_name.clone()
-        },
+        id,
+        name,
         device_name,
         x: bounds.left,
         y: bounds.top,
@@ -99,8 +83,45 @@ fn monitor_info(monitor: HMONITOR) -> Option<MonitorInfo> {
     })
 }
 
-fn stable_monitor_id(device_name: &str, bounds: &RECT) -> String {
-    if device_name.trim().is_empty() {
+pub fn monitor_id_matches(monitor: &MonitorInfo, saved_id: &str) -> bool {
+    monitor.id.eq_ignore_ascii_case(saved_id) || monitor.device_name.eq_ignore_ascii_case(saved_id)
+}
+
+fn monitor_identity(device_name: &str, bounds: &RECT) -> (String, String) {
+    if !device_name.trim().is_empty() {
+        let encoded = device_name
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let mut display = DISPLAY_DEVICEW {
+            cb: std::mem::size_of::<DISPLAY_DEVICEW>() as u32,
+            ..Default::default()
+        };
+        let found = unsafe {
+            EnumDisplayDevicesW(
+                PCWSTR(encoded.as_ptr()),
+                0,
+                &mut display,
+                EDD_GET_DEVICE_INTERFACE_NAME,
+            )
+        };
+        if found.as_bool() {
+            let interface_id = wide_to_string(&display.DeviceID);
+            let friendly_name = wide_to_string(&display.DeviceString);
+            if !interface_id.trim().is_empty() {
+                return (
+                    interface_id.to_ascii_lowercase(),
+                    if friendly_name.trim().is_empty() {
+                        device_name.to_string()
+                    } else {
+                        friendly_name
+                    },
+                );
+            }
+        }
+    }
+
+    let fallback_id = if device_name.trim().is_empty() {
         format!(
             "bounds:{}:{}:{}:{}",
             bounds.left,
@@ -110,7 +131,13 @@ fn stable_monitor_id(device_name: &str, bounds: &RECT) -> String {
         )
     } else {
         device_name.to_ascii_lowercase()
-    }
+    };
+    let fallback_name = if device_name.trim().is_empty() {
+        "Display".to_string()
+    } else {
+        device_name.to_string()
+    };
+    (fallback_id, fallback_name)
 }
 
 fn scale_factor_for_monitor(monitor: HMONITOR) -> f64 {

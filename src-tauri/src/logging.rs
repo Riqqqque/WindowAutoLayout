@@ -2,6 +2,7 @@ use std::{
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
+    sync::Mutex,
 };
 
 use chrono::Utc;
@@ -14,6 +15,7 @@ use crate::{
 const LOG_DIR_NAME: &str = "logs";
 const LOG_FILE_NAME: &str = "windowautolayout.log";
 const MAX_LOG_BYTES: u64 = 1_048_576;
+static LOG_LOCK: Mutex<()> = Mutex::new(());
 
 pub fn log_file_path(config_dir: &Path) -> PathBuf {
     config_dir.join(LOG_DIR_NAME).join(LOG_FILE_NAME)
@@ -26,6 +28,7 @@ pub fn append(
     app: Option<&str>,
     message: impl AsRef<str>,
 ) -> AppResult<()> {
+    let _guard = LOG_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let path = log_file_path(config_dir);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -46,6 +49,7 @@ pub fn append(
 }
 
 pub fn read(config_dir: &Path, max_lines: usize) -> AppResult<Vec<LogEntry>> {
+    let _guard = LOG_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let path = log_file_path(config_dir);
     if !path.exists() {
         return Ok(Vec::new());
@@ -63,6 +67,7 @@ pub fn read(config_dir: &Path, max_lines: usize) -> AppResult<Vec<LogEntry>> {
 }
 
 pub fn clear(config_dir: &Path) -> AppResult<()> {
+    let _guard = LOG_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let path = log_file_path(config_dir);
     if path.exists() {
         fs::write(path, "")?;

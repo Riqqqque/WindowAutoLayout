@@ -1,5 +1,9 @@
 use std::{
     path::Path,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex, TryLockError,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -11,12 +15,46 @@ use crate::{
     errors::{AppError, AppResult},
     launcher, logging,
     models::{
-        AppConfig, AppRestoreResult, AppRestoreStatus, LayoutRect, LogSeverity, MatchRule,
-        MonitorInfo, MonitorMissingBehavior, Profile, RestoreResult, RestoreStatus, TitleMatchMode,
-        WindowAutoLayoutConfig, WindowInfo,
+        AppConfig, AppRestoreResult, AppRestoreStatus, CapturedDisplay, LayoutRect, LogSeverity,
+        MatchRule, MonitorInfo, MonitorMissingBehavior, Profile, RestoreResult, RestoreStatus,
+        TitleMatchMode, WindowAutoLayoutConfig, WindowInfo,
     },
-    monitors, processes, window_actions, windows_enum,
+    monitors, performance, processes, tray_ui, window_actions, windows_enum,
 };
+
+static RESTORE_LOCK: Mutex<()> = Mutex::new(());
+static RESTORE_ACTIVE: AtomicBool = AtomicBool::new(false);
+static LAST_RESTORE_FINISHED: Mutex<Option<Instant>> = Mutex::new(None);
+const RESTORE_EVENT_SUPPRESSION: Duration = Duration::from_secs(1);
+
+struct RestoreActivityGuard;
+
+impl RestoreActivityGuard {
+    fn enter() -> Self {
+        RESTORE_ACTIVE.store(true, Ordering::Release);
+        tray_ui::set_restoring(true);
+        Self
+    }
+}
+
+impl Drop for RestoreActivityGuard {
+    fn drop(&mut self) {
+        if let Ok(mut last_finished) = LAST_RESTORE_FINISHED.lock() {
+            *last_finished = Some(Instant::now());
+        }
+        RESTORE_ACTIVE.store(false, Ordering::Release);
+        tray_ui::set_restoring(false);
+    }
+}
+
+pub fn restore_events_suppressed() -> bool {
+    RESTORE_ACTIVE.load(Ordering::Acquire)
+        || LAST_RESTORE_FINISHED
+            .lock()
+            .ok()
+            .and_then(|last_finished| *last_finished)
+            .is_some_and(|finished| finished.elapsed() < RESTORE_EVENT_SUPPRESSION)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AppPresence {
@@ -42,6 +80,13 @@ struct RestoreTarget<'a> {
     layout: &'a LayoutRect,
 }
 
+#[derive(Clone, Copy)]
+struct RestoreMode {
+    log_events: bool,
+    activate_visible_windows: bool,
+    abort_for_latency_sensitive_foreground: bool,
+}
+
 pub fn restore_profile(
     config_dir: &Path,
     config: &WindowAutoLayoutConfig,
@@ -53,8 +98,11 @@ pub fn restore_profile(
         config,
         profile_id,
         launch_missing_override,
-        true,
-        true,
+        RestoreMode {
+            log_events: true,
+            activate_visible_windows: true,
+            abort_for_latency_sensitive_foreground: true,
+        },
     )
 }
 
@@ -69,60 +117,31 @@ pub fn restore_profile_silent(
         config,
         profile_id,
         launch_missing_override,
-        false,
-        false,
+        RestoreMode {
+            log_events: false,
+            activate_visible_windows: false,
+            abort_for_latency_sensitive_foreground: true,
+        },
     )
 }
 
-pub fn profile_window_signature(
+pub fn restore_profile_background(
+    config_dir: &Path,
     config: &WindowAutoLayoutConfig,
-    profile_id: Option<&str>,
-) -> AppResult<String> {
-    let profile = resolve_profile(config, profile_id)?;
-    let windows = windows_enum::list_windows_with_hidden(true).unwrap_or_default();
-    Ok(profile_window_signature_from_windows(profile, &windows))
-}
-
-fn profile_window_signature_from_windows(profile: &Profile, windows: &[WindowInfo]) -> String {
-    profile
-        .apps
-        .iter()
-        .map(|app| app_window_signature(app, windows))
-        .collect::<Vec<_>>()
-        .join("|")
-}
-
-fn app_window_signature(app: &AppConfig, windows: &[WindowInfo]) -> String {
-    let mut matched = windows
-        .iter()
-        .filter(|window| window_matches_app(window, app, None))
-        .cloned()
-        .collect::<Vec<_>>();
-    sort_matching_windows(&mut matched);
-    let selected = selected_matching_windows(app, &matched);
-
-    if selected.is_empty() {
-        return format!("{}:missing", app.id);
-    }
-
-    let windows = selected
-        .iter()
-        .map(|window| {
-            format!(
-                "{}:{}:{}:{}:{}:{}:{}:{}",
-                window.handle,
-                window.process_id,
-                window.is_visible,
-                window.is_minimized,
-                window.x,
-                window.y,
-                window.width,
-                window.height
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-    format!("{}:{windows}", app.id)
+    profile_id: Option<String>,
+    launch_missing_override: Option<bool>,
+) -> AppResult<RestoreResult> {
+    restore_profile_inner(
+        config_dir,
+        config,
+        profile_id,
+        launch_missing_override,
+        RestoreMode {
+            log_events: true,
+            activate_visible_windows: false,
+            abort_for_latency_sensitive_foreground: true,
+        },
+    )
 }
 
 fn restore_profile_inner(
@@ -130,19 +149,40 @@ fn restore_profile_inner(
     config: &WindowAutoLayoutConfig,
     profile_id: Option<String>,
     launch_missing_override: Option<bool>,
-    log_events: bool,
-    activate_visible_windows: bool,
+    mode: RestoreMode,
 ) -> AppResult<RestoreResult> {
+    let _restore_guard = match RESTORE_LOCK.try_lock() {
+        Ok(guard) => guard,
+        Err(TryLockError::WouldBlock) => return Err(AppError::RestoreInProgress),
+        Err(TryLockError::Poisoned(_)) => {
+            return Err(AppError::Config("Restore lock was poisoned".to_string()))
+        }
+    };
+    let _activity_guard = RestoreActivityGuard::enter();
+    let log_events = mode.log_events;
+    let abort_for_latency_sensitive_foreground = mode.abort_for_latency_sensitive_foreground;
     let started_at = Utc::now();
     let profile = resolve_profile(config, profile_id.as_deref())?.clone();
+    if abort_for_latency_sensitive_foreground && performance::foreground_is_latency_sensitive() {
+        if log_events {
+            let _ = logging::append(
+                config_dir,
+                LogSeverity::Info,
+                Some(&profile.name),
+                None,
+                "Restore paused for a foreground game or fullscreen app",
+            );
+        }
+        return Ok(paused_restore_result(profile, started_at));
+    }
     if log_events {
-        logging::append(
+        let _ = logging::append(
             config_dir,
             LogSeverity::Info,
             Some(&profile.name),
             None,
             "Restore started",
-        )?;
+        );
     }
 
     let monitors = monitors::list_monitors()?;
@@ -160,49 +200,52 @@ fn restore_profile_inner(
             results,
         };
         if log_events {
-            logging::append(
+            let _ = logging::append(
                 config_dir,
                 LogSeverity::Warn,
                 Some(&profile.name),
                 None,
                 "Restore skipped because the saved monitor is missing",
-            )?;
+            );
         }
         return Ok(result);
     }
 
-    let monitor = monitor.expect("checked above");
+    let Some(monitor) = monitor else {
+        return Err(AppError::MonitorNotFound);
+    };
     if monitor.is_fallback && log_events {
-        logging::append(
+        let _ = logging::append(
             config_dir,
             LogSeverity::Warn,
             Some(&profile.name),
             None,
             format!("Saved monitor is missing; using {}", monitor.monitor.name),
-        )?;
+        );
     }
+    let mut paused = false;
     for app in &profile.apps {
+        if abort_for_latency_sensitive_foreground && performance::foreground_is_latency_sensitive()
+        {
+            paused = true;
+            break;
+        }
         let app_monitor = resolve_app_monitor(config, &profile, app, &monitors)
             .unwrap_or_else(|| monitor.clone());
-        let layout = if app_monitor.is_fallback {
-            scaled_layout_for_monitor(&profile, app, &app_monitor.monitor)
-        } else {
-            app.layout.clone()
-        };
+        let layout = restore_layout_for_monitor(&profile, app, &app_monitor);
         let launch_missing = launch_missing_override.unwrap_or(config.startup.launch_missing_apps);
         let target = RestoreTarget {
             monitor: &app_monitor.monitor,
             layout: &layout,
         };
-        results.push(restore_app(
-            config_dir,
-            &profile,
-            app,
-            target,
-            launch_missing,
-            log_events,
-            activate_visible_windows,
-        ));
+        let result = restore_app(config_dir, &profile, app, target, launch_missing, mode);
+        if matches!(result.status, AppRestoreStatus::Paused) {
+            paused = true;
+        }
+        results.push(result);
+        if paused {
+            break;
+        }
     }
 
     let success_count = results
@@ -210,11 +253,13 @@ fn restore_profile_inner(
         .filter(|result| {
             matches!(
                 result.status,
-                AppRestoreStatus::Success | AppRestoreStatus::Launched
+                AppRestoreStatus::Success | AppRestoreStatus::Launched | AppRestoreStatus::Skipped
             )
         })
         .count();
-    let status = if success_count == results.len() {
+    let status = if paused {
+        RestoreStatus::Paused
+    } else if success_count == results.len() {
         RestoreStatus::Success
     } else if success_count > 0 {
         RestoreStatus::PartialSuccess
@@ -223,9 +268,9 @@ fn restore_profile_inner(
     };
 
     if log_events {
-        logging::append(
+        let _ = logging::append(
             config_dir,
-            if matches!(status, RestoreStatus::Success) {
+            if matches!(status, RestoreStatus::Success | RestoreStatus::Paused) {
                 LogSeverity::Info
             } else {
                 LogSeverity::Warn
@@ -233,7 +278,7 @@ fn restore_profile_inner(
             Some(&profile.name),
             None,
             format!("Restore finished with status {status:?}"),
-        )?;
+        );
     }
 
     Ok(RestoreResult {
@@ -247,23 +292,16 @@ fn restore_profile_inner(
     })
 }
 
-pub fn enforce_profile_for(
-    config_dir: &Path,
-    config: &WindowAutoLayoutConfig,
-    profile_id: Option<String>,
-    duration_seconds: u64,
-    interval_ms: u64,
-) -> AppResult<RestoreResult> {
-    let interval = interval_ms.clamp(2000, 5000);
-    let until = Instant::now() + Duration::from_secs(duration_seconds.max(1));
-    let mut last = restore_profile(config_dir, config, profile_id.clone(), Some(false))?;
-
-    while Instant::now() < until {
-        thread::sleep(Duration::from_millis(interval));
-        last = restore_profile(config_dir, config, profile_id.clone(), Some(false))?;
+fn paused_restore_result(profile: Profile, started_at: chrono::DateTime<Utc>) -> RestoreResult {
+    RestoreResult {
+        profile_id: profile.id,
+        profile_name: profile.name,
+        status: RestoreStatus::Paused,
+        started_at: started_at.to_rfc3339(),
+        finished_at: Utc::now().to_rfc3339(),
+        monitor: None,
+        results: Vec::new(),
     }
-
-    Ok(last)
 }
 
 pub fn resolve_profile<'a>(
@@ -296,9 +334,14 @@ fn restore_app(
     app: &AppConfig,
     target: RestoreTarget<'_>,
     launch_missing: bool,
-    log_events: bool,
-    activate_visible_windows: bool,
+    mode: RestoreMode,
 ) -> AppRestoreResult {
+    let RestoreMode {
+        log_events,
+        activate_visible_windows,
+        abort_for_latency_sensitive_foreground,
+    } = mode;
+    let previous_foreground = window_actions::foreground_window();
     let mut matched = find_matching_windows(app, None);
     let mut running_processes = matching_processes(app);
     let mut presence = if matched.is_empty() {
@@ -311,9 +354,12 @@ fn restore_app(
         AppPresence::RunningWithWindow
     };
     let mut launched = false;
-    let mut activate_after_hidden_restore = false;
-
-    if launch_missing && should_show_matched_windows(app, &matched) {
+    let mut surface_refresh_needed = should_show_matched_windows(app, &matched);
+    if should_show_matched_windows(app, &matched) {
+        if abort_for_latency_sensitive_foreground && performance::foreground_is_latency_sensitive()
+        {
+            return background_restore_paused(app, matched);
+        }
         let selected = selected_matching_windows(app, &matched);
         if should_restore_through_qt_tray(app, &selected) {
             let mut activated_processes = Vec::new();
@@ -340,6 +386,8 @@ fn restore_app(
                     None,
                     app.detection_timeout_seconds,
                     app.retry_interval_ms,
+                    abort_for_latency_sensitive_foreground,
+                    false,
                 );
                 if restored
                     .iter()
@@ -357,7 +405,6 @@ fn restore_app(
                     } else {
                         AppPresence::RunningWithWindow
                     };
-                    activate_after_hidden_restore = true;
                 }
             }
         }
@@ -373,6 +420,9 @@ fn restore_app(
                         break;
                     }
                 }
+            }
+            if show_error.is_none() && !is_obs_app(app) {
+                surface_refresh_needed = false;
             }
         }
 
@@ -401,6 +451,8 @@ fn restore_app(
                 None,
                 app.detection_timeout_seconds,
                 app.retry_interval_ms,
+                abort_for_latency_sensitive_foreground,
+                false,
             );
             settle_visible_window(app);
             matched = find_matching_windows(app, None);
@@ -414,14 +466,13 @@ fn restore_app(
             } else {
                 AppPresence::RunningWithWindow
             };
-            activate_after_hidden_restore = true;
         }
     }
 
     let should_wake_running =
         matches!(presence, AppPresence::RunningWithoutWindow) && app.wake_running_process;
 
-    if matched.is_empty() && launch_missing && should_wake_running && is_obs_app(app) {
+    if matched.is_empty() && should_wake_running && is_obs_app(app) {
         let mut activated_processes = Vec::new();
         for process in &running_processes {
             if !activated_processes.contains(&process.pid)
@@ -432,6 +483,7 @@ fn restore_app(
         }
 
         if !activated_processes.is_empty() {
+            surface_refresh_needed = true;
             if log_events {
                 let _ = logging::append(
                     config_dir,
@@ -446,6 +498,8 @@ fn restore_app(
                 None,
                 app.detection_timeout_seconds,
                 app.retry_interval_ms,
+                abort_for_latency_sensitive_foreground,
+                false,
             );
             settle_visible_window(app);
             matched = find_matching_windows(app, None);
@@ -459,7 +513,6 @@ fn restore_app(
             } else {
                 AppPresence::RunningWithWindow
             };
-            activate_after_hidden_restore = true;
         }
     }
 
@@ -472,72 +525,81 @@ fn restore_app(
         && launch_missing
         && (should_launch_missing || should_launch_running_process)
     {
+        if abort_for_latency_sensitive_foreground && performance::foreground_is_latency_sensitive()
+        {
+            return background_restore_paused(app, matched);
+        }
         let launch_path = if should_launch_running_process {
             running_process_launch_path(app, &running_processes)
         } else {
             app.executable_path.clone()
         };
-        let launched_pid = match launcher::launch_app_with_path(app, launch_path.as_deref()) {
-            Ok(pid) => {
-                launched = true;
-                if log_events {
-                    let _ = logging::append(
-                        config_dir,
-                        LogSeverity::Info,
-                        Some(&profile.name),
-                        Some(&app.display_name),
-                        format!(
-                            "{}{}",
-                            if matches!(presence, AppPresence::RunningWithoutWindow) {
-                                "Asked running app to show a window"
-                            } else {
-                                "Launched app"
-                            },
-                            pid.map(|pid| format!(" with PID {pid}"))
-                                .unwrap_or_default()
-                        ),
+        let launch_config = app_for_restore_launch(app);
+        let launched_pid =
+            match launcher::launch_app_with_path(&launch_config, launch_path.as_deref()) {
+                Ok(pid) => {
+                    launched = should_launch_missing;
+                    surface_refresh_needed = true;
+                    if log_events {
+                        let _ = logging::append(
+                            config_dir,
+                            LogSeverity::Info,
+                            Some(&profile.name),
+                            Some(&app.display_name),
+                            format!(
+                                "{}{}",
+                                if matches!(presence, AppPresence::RunningWithoutWindow) {
+                                    "Asked running app to show a window"
+                                } else {
+                                    "Launched app"
+                                },
+                                pid.map(|pid| format!(" with PID {pid}"))
+                                    .unwrap_or_default()
+                            ),
+                        );
+                    }
+                    pid
+                }
+                Err(AppError::InvalidExecutablePath(path)) => {
+                    let message = format!("Invalid executable path: {path}");
+                    if log_events {
+                        let _ = logging::append(
+                            config_dir,
+                            LogSeverity::Error,
+                            Some(&profile.name),
+                            Some(&app.display_name),
+                            &message,
+                        );
+                    }
+                    return app_result(
+                        app,
+                        AppRestoreStatus::InvalidExecutablePath,
+                        message,
+                        matched,
                     );
                 }
-                pid
-            }
-            Err(AppError::InvalidExecutablePath(path)) => {
-                let message = format!("Invalid executable path: {path}");
-                if log_events {
-                    let _ = logging::append(
-                        config_dir,
-                        LogSeverity::Error,
-                        Some(&profile.name),
-                        Some(&app.display_name),
-                        &message,
-                    );
+                Err(error) => {
+                    let message = error.to_string();
+                    if log_events {
+                        let _ = logging::append(
+                            config_dir,
+                            LogSeverity::Error,
+                            Some(&profile.name),
+                            Some(&app.display_name),
+                            &message,
+                        );
+                    }
+                    return app_result(app, AppRestoreStatus::Failed, message, matched);
                 }
-                return app_result(
-                    app,
-                    AppRestoreStatus::InvalidExecutablePath,
-                    message,
-                    matched,
-                );
-            }
-            Err(error) => {
-                let message = error.to_string();
-                if log_events {
-                    let _ = logging::append(
-                        config_dir,
-                        LogSeverity::Error,
-                        Some(&profile.name),
-                        Some(&app.display_name),
-                        &message,
-                    );
-                }
-                return app_result(app, AppRestoreStatus::Failed, message, matched);
-            }
-        };
+            };
 
         let _ = wait_for_visible_windows(
             app,
             launched_pid,
-            app.detection_timeout_seconds,
+            launch_detection_timeout_seconds(app),
             app.retry_interval_ms,
+            abort_for_latency_sensitive_foreground,
+            true,
         );
         settle_visible_window(app);
         matched = find_matching_windows(app, launched_pid);
@@ -554,6 +616,35 @@ fn restore_app(
     }
 
     if matched.is_empty() {
+        if is_quick_tray_detection_app(app) && matches!(presence, AppPresence::RunningWithoutWindow)
+        {
+            let message = if launched {
+                "App launched and is running in the tray; no movable window was exposed"
+            } else {
+                "App is running in the tray; no movable window was exposed"
+            }
+            .to_string();
+            if log_events {
+                let _ = logging::append(
+                    config_dir,
+                    LogSeverity::Info,
+                    Some(&profile.name),
+                    Some(&app.display_name),
+                    &message,
+                );
+            }
+            return app_result(
+                app,
+                if launched {
+                    AppRestoreStatus::Launched
+                } else {
+                    AppRestoreStatus::Success
+                },
+                message,
+                matched,
+            );
+        }
+
         let status = if launched {
             AppRestoreStatus::LaunchedWindowNotFound
         } else {
@@ -593,6 +684,10 @@ fn restore_app(
     let mut already_current_count = 0usize;
 
     for window in &selected {
+        if abort_for_latency_sensitive_foreground && performance::foreground_is_latency_sensitive()
+        {
+            return background_restore_paused(app, matched);
+        }
         let hwnd = match windows_enum::parse_handle(&window.handle) {
             Ok(hwnd) => hwnd,
             Err(error) => {
@@ -601,10 +696,7 @@ fn restore_app(
         };
         let pull_hidden_window = app.pull_hidden_windows && !window.is_visible;
         let restore_minimized_window = app.restore_if_minimized && window.is_minimized;
-        let activate_window = pull_hidden_window
-            || restore_minimized_window
-            || activate_after_hidden_restore
-            || activate_visible_windows;
+        let activate_window = activate_visible_windows;
         if window_layout_is_current(
             window,
             target.monitor,
@@ -614,35 +706,48 @@ fn restore_app(
             restore_minimized_window,
             activate_window,
         ) {
+            if surface_refresh_needed
+                && !refresh_exposed_surface(
+                    app,
+                    hwnd,
+                    activate_visible_windows,
+                    previous_foreground,
+                )
+                && log_events
+            {
+                let _ = logging::append(
+                    config_dir,
+                    LogSeverity::Warn,
+                    Some(&profile.name),
+                    Some(&app.display_name),
+                    "OBS client surface stayed blank after bounded recovery",
+                );
+            }
             already_current_count += 1;
             continue;
         }
-        if let Err(error) = window_actions::apply_layout(
+        if let Err(error) = apply_layout_verified(
             hwnd,
             target.monitor,
             target.layout,
-            &app.window_state,
-            app.force_resize,
+            app,
             restore_minimized_window,
             pull_hidden_window,
             activate_window,
         ) {
-            let message = error.to_string();
-            let status = if message.to_ascii_lowercase().contains("access") {
-                AppRestoreStatus::PermissionDenied
-            } else {
-                AppRestoreStatus::MoveFailed
-            };
-            if log_events {
-                let _ = logging::append(
-                    config_dir,
-                    LogSeverity::Error,
-                    Some(&profile.name),
-                    Some(&app.display_name),
-                    &message,
-                );
-            }
-            return app_result(app, status, message, matched);
+            return move_failed_result(config_dir, profile, app, matched, error, log_events);
+        }
+        if surface_refresh_needed
+            && !refresh_exposed_surface(app, hwnd, activate_visible_windows, previous_foreground)
+            && log_events
+        {
+            let _ = logging::append(
+                config_dir,
+                LogSeverity::Warn,
+                Some(&profile.name),
+                Some(&app.display_name),
+                "OBS client surface stayed blank after bounded recovery",
+            );
         }
         moved_count += 1;
     }
@@ -684,13 +789,6 @@ fn restore_app(
     app_result(app, status, message, selected)
 }
 
-pub fn window_matches_profile_app(profile: &Profile, window: &WindowInfo) -> bool {
-    profile
-        .apps
-        .iter()
-        .any(|app| window_matches_app(window, app, None))
-}
-
 pub fn find_matching_windows(app: &AppConfig, launched_pid: Option<u32>) -> Vec<WindowInfo> {
     let mut matched =
         windows_enum::list_windows_with_hidden(app.pull_hidden_windows || launched_pid.is_some())
@@ -708,7 +806,10 @@ fn sort_matching_windows(matched: &mut [WindowInfo]) {
             .is_visible
             .cmp(&left.is_visible)
             .then(left.is_minimized.cmp(&right.is_minimized))
-            .then((right.width * right.height).cmp(&(left.width * left.height)))
+            .then(
+                (i64::from(right.width) * i64::from(right.height))
+                    .cmp(&(i64::from(left.width) * i64::from(left.height))),
+            )
             .then(left.title.cmp(&right.title))
     });
 }
@@ -730,6 +831,15 @@ fn window_layout_is_current(
         return false;
     }
 
+    window_geometry_matches_layout(window, monitor, app, layout)
+}
+
+fn window_geometry_matches_layout(
+    window: &WindowInfo,
+    monitor: &MonitorInfo,
+    app: &AppConfig,
+    layout: &LayoutRect,
+) -> bool {
     let rect = window_actions::absolute_rect(monitor, layout);
     nearly_equal(window.x, rect.left)
         && nearly_equal(window.y, rect.top)
@@ -738,8 +848,83 @@ fn window_layout_is_current(
                 && nearly_equal(window.height, rect.bottom - rect.top)))
 }
 
+#[allow(clippy::too_many_arguments)]
+fn apply_layout_verified(
+    hwnd: windows::Win32::Foundation::HWND,
+    monitor: &MonitorInfo,
+    layout: &LayoutRect,
+    app: &AppConfig,
+    restore_minimized_window: bool,
+    pull_hidden_window: bool,
+    activate_window: bool,
+) -> AppResult<()> {
+    window_actions::apply_layout(
+        hwnd,
+        monitor,
+        layout,
+        &app.window_state,
+        app.force_resize,
+        restore_minimized_window,
+        pull_hidden_window,
+        activate_window,
+    )?;
+    if app.window_state != crate::models::WindowStatePreference::Normal {
+        return Ok(());
+    }
+
+    let delays = [80, 180, 320];
+    let mut matched_once = false;
+    let mut last_window = None;
+    for (index, delay_ms) in delays.into_iter().enumerate() {
+        thread::sleep(Duration::from_millis(delay_ms));
+        let Some(window) = windows_enum::window_info_from_handle_lightweight(hwnd) else {
+            continue;
+        };
+        if window_geometry_matches_layout(&window, monitor, app, layout) {
+            if matched_once || index == delays.len() - 1 {
+                return Ok(());
+            }
+            matched_once = true;
+            last_window = Some(window);
+            continue;
+        }
+
+        matched_once = false;
+        last_window = Some(window);
+        if index < delays.len() - 1 {
+            window_actions::apply_layout(
+                hwnd,
+                monitor,
+                layout,
+                &app.window_state,
+                app.force_resize,
+                false,
+                false,
+                false,
+            )?;
+        }
+    }
+
+    let expected = window_actions::absolute_rect(monitor, layout);
+    let actual = last_window
+        .map(|window| {
+            format!(
+                "{},{} {}x{}",
+                window.x, window.y, window.width, window.height
+            )
+        })
+        .unwrap_or_else(|| "window unavailable".to_string());
+    Err(AppError::Windows(format!(
+        "Window did not hold the saved placement. Expected {},{} {}x{}; got {actual}",
+        expected.left,
+        expected.top,
+        expected.right - expected.left,
+        expected.bottom - expected.top
+    )))
+}
+
 fn nearly_equal(left: i32, right: i32) -> bool {
-    (left - right).abs() <= 3
+    left.abs_diff(right) <= 1
 }
 
 fn should_show_matched_windows(app: &AppConfig, matched: &[WindowInfo]) -> bool {
@@ -752,6 +937,20 @@ fn should_show_matched_windows(app: &AppConfig, matched: &[WindowInfo]) -> bool 
 
 fn should_restore_through_qt_tray(app: &AppConfig, matched: &[WindowInfo]) -> bool {
     is_obs_app(app) && !matched.is_empty() && matched.iter().all(|window| !window.is_visible)
+}
+
+fn refresh_exposed_surface(
+    app: &AppConfig,
+    hwnd: windows::Win32::Foundation::HWND,
+    keep_active: bool,
+    previous_foreground: windows::Win32::Foundation::HWND,
+) -> bool {
+    if is_obs_app(app) {
+        window_actions::wake_renderer_after_restore(hwnd, keep_active, previous_foreground)
+    } else {
+        window_actions::show_window_for_restore(hwnd);
+        true
+    }
 }
 
 fn selected_matching_windows(app: &AppConfig, matched: &[WindowInfo]) -> Vec<WindowInfo> {
@@ -767,18 +966,25 @@ fn wait_for_visible_windows(
     launched_pid: Option<u32>,
     timeout_seconds: u64,
     retry_interval_ms: u64,
+    abort_for_latency_sensitive_foreground: bool,
+    require_launch_ready_size: bool,
 ) -> Vec<WindowInfo> {
     let timeout = Duration::from_secs(timeout_seconds.max(1));
-    let interval = Duration::from_millis(retry_interval_ms.max(100));
+    let interval = Duration::from_millis(retry_interval_ms.clamp(250, 5000));
     let deadline = Instant::now() + timeout;
     let mut last_match = Vec::new();
 
     loop {
-        let matched = find_matching_windows(app, launched_pid);
-        if matched
-            .iter()
-            .any(|window| window.is_visible && !window.is_minimized)
+        if abort_for_latency_sensitive_foreground && performance::foreground_is_latency_sensitive()
         {
+            return last_match;
+        }
+        let matched = find_matching_windows(app, launched_pid);
+        if matched.iter().any(|window| {
+            window.is_visible
+                && !window.is_minimized
+                && (!require_launch_ready_size || launch_window_is_ready(app, window))
+        }) {
             return matched;
         }
         if !matched.is_empty() {
@@ -789,6 +995,27 @@ fn wait_for_visible_windows(
         }
         thread::sleep(interval);
     }
+}
+
+fn launch_window_is_ready(app: &AppConfig, window: &WindowInfo) -> bool {
+    if !app.force_resize {
+        return true;
+    }
+
+    let minimum_width = (app.layout.width / 2).clamp(160, 960).min(app.layout.width);
+    let minimum_height = (app.layout.height / 2)
+        .clamp(120, 720)
+        .min(app.layout.height);
+    window.width >= minimum_width && window.height >= minimum_height
+}
+
+fn background_restore_paused(app: &AppConfig, matched: Vec<WindowInfo>) -> AppRestoreResult {
+    app_result(
+        app,
+        AppRestoreStatus::Paused,
+        "Restore paused for a foreground game or fullscreen app".to_string(),
+        matched,
+    )
 }
 
 fn settle_visible_window(app: &AppConfig) {
@@ -804,6 +1031,34 @@ fn is_obs_app(app: &AppConfig) -> bool {
     configured_process_name(app)
         .map(|process_name| names_match("obs64.exe", &process_name))
         .unwrap_or(false)
+}
+
+fn launch_detection_timeout_seconds(app: &AppConfig) -> u64 {
+    if is_quick_tray_detection_app(app) {
+        app.detection_timeout_seconds.clamp(1, 5)
+    } else {
+        app.detection_timeout_seconds
+    }
+}
+
+fn is_quick_tray_detection_app(app: &AppConfig) -> bool {
+    configured_process_name(app)
+        .map(|process_name| names_match("OpenLaunchDeck.exe", &process_name))
+        .unwrap_or(false)
+}
+
+fn app_for_restore_launch(app: &AppConfig) -> AppConfig {
+    let mut launch_config = app.clone();
+    if is_quick_tray_detection_app(app) {
+        launch_config.arguments.retain(|argument| {
+            !matches!(
+                argument.trim().to_ascii_lowercase().as_str(),
+                "--background" | "--start-minimized" | "--show" | "--focus"
+            )
+        });
+        launch_config.arguments.push("--show".to_string());
+    }
+    launch_config
 }
 
 fn window_matches_app(window: &WindowInfo, app: &AppConfig, launched_pid: Option<u32>) -> bool {
@@ -827,15 +1082,18 @@ fn window_matches_app(window: &WindowInfo, app: &AppConfig, launched_pid: Option
             .executable_path
             .as_ref()
             .zip(window.executable_path.as_ref())
-            .map(|(expected, actual)| expected.eq_ignore_ascii_case(actual))
+            .map(|(expected, actual)| {
+                expected.eq_ignore_ascii_case(actual)
+                    || processes::same_windows_app_package(expected, actual)
+            })
             .unwrap_or(false);
 
     if !process_matches {
         return false;
     }
 
-    if app.title_rule.is_none()
-        && is_known_process_tool_window(window, configured_process_name.as_deref())
+    if is_known_process_tool_window(window, configured_process_name.as_deref())
+        && !explicitly_targets_tool_window(app, window)
     {
         return false;
     }
@@ -963,10 +1221,17 @@ fn is_known_process_tool_window(
 
 fn is_obs_main_window(window: &WindowInfo) -> bool {
     let title = window.title.trim().to_ascii_lowercase();
-    title == "obs"
-        || title.starts_with("obs ")
-        || title.starts_with("obs-")
-        || title.contains(" - profile:")
+    let versioned_title = title
+        .strip_prefix("obs ")
+        .and_then(|suffix| suffix.chars().next())
+        .is_some_and(|character| character.is_ascii_digit());
+    title == "obs" || versioned_title || title.contains(" - profile:")
+}
+
+fn explicitly_targets_tool_window(app: &AppConfig, window: &WindowInfo) -> bool {
+    app.title_rule.as_ref().is_some_and(|rule| {
+        matches!(rule.mode, TitleMatchMode::Exact) && title_matches(&window.title, rule)
+    })
 }
 
 fn resolve_app_monitor(
@@ -976,7 +1241,10 @@ fn resolve_app_monitor(
     monitors: &[MonitorInfo],
 ) -> Option<MonitorResolution> {
     if let Some(id) = &app.target_monitor_id {
-        if let Some(monitor) = monitors.iter().find(|monitor| &monitor.id == id) {
+        if let Some(monitor) = monitors
+            .iter()
+            .find(|monitor| monitors::monitor_id_matches(monitor, id))
+        {
             return Some(MonitorResolution {
                 monitor: monitor.clone(),
                 is_fallback: false,
@@ -984,7 +1252,7 @@ fn resolve_app_monitor(
         }
         if matches!(
             config.global.monitor_missing_behavior,
-            MonitorMissingBehavior::DoNothing | MonitorMissingBehavior::AskNextOpen
+            MonitorMissingBehavior::DoNothing
         ) {
             return None;
         }
@@ -1004,7 +1272,10 @@ fn resolve_profile_monitor(
         .or(config.global.default_monitor_id.as_ref());
 
     if let Some(id) = requested {
-        if let Some(monitor) = monitors.iter().find(|monitor| &monitor.id == id) {
+        if let Some(monitor) = monitors
+            .iter()
+            .find(|monitor| monitors::monitor_id_matches(monitor, id))
+        {
             return Some(MonitorResolution {
                 monitor: monitor.clone(),
                 is_fallback: false,
@@ -1012,26 +1283,23 @@ fn resolve_profile_monitor(
         }
 
         return match config.global.monitor_missing_behavior {
-            MonitorMissingBehavior::DoNothing | MonitorMissingBehavior::AskNextOpen => None,
+            MonitorMissingBehavior::DoNothing => None,
             MonitorMissingBehavior::UsePrimary => monitors
                 .iter()
                 .find(|monitor| monitor.is_primary)
                 .cloned()
                 .map(fallback_monitor),
-            MonitorMissingBehavior::NearestMatch => monitors
-                .iter()
-                .find(|monitor| !monitor.is_primary)
-                .cloned()
-                .or_else(|| monitors.iter().find(|monitor| monitor.is_primary).cloned())
-                .map(fallback_monitor),
+            MonitorMissingBehavior::NearestMatch => {
+                nearest_monitor_for_profile(profile, monitors).map(fallback_monitor)
+            }
         };
     }
 
     monitors
         .iter()
-        .find(|monitor| !monitor.is_primary)
+        .find(|monitor| monitor.is_primary)
         .cloned()
-        .or_else(|| monitors.iter().find(|monitor| monitor.is_primary).cloned())
+        .or_else(|| monitors.first().cloned())
         .map(|monitor| MonitorResolution {
             monitor,
             is_fallback: false,
@@ -1045,12 +1313,118 @@ fn fallback_monitor(monitor: MonitorInfo) -> MonitorResolution {
     }
 }
 
+fn restore_layout_for_monitor(
+    profile: &Profile,
+    app: &AppConfig,
+    resolution: &MonitorResolution,
+) -> LayoutRect {
+    let layout = if let Some(captured_display) = &app.captured_display {
+        scaled_layout_from_captured_display(&app.layout, captured_display, &resolution.monitor)
+    } else if resolution.is_fallback {
+        scaled_layout_for_monitor(profile, app, &resolution.monitor)
+    } else {
+        app.layout.clone()
+    };
+    keep_layout_visible_on_monitor(&layout, &resolution.monitor)
+}
+
+fn scaled_layout_from_captured_display(
+    layout: &LayoutRect,
+    captured: &CapturedDisplay,
+    monitor: &MonitorInfo,
+) -> LayoutRect {
+    if captured.width <= 0 || captured.height <= 0 || monitor.width <= 0 || monitor.height <= 0 {
+        return layout.clone();
+    }
+
+    let monitor_work_x = monitor.work_x - monitor.x;
+    let monitor_work_y = monitor.work_y - monitor.y;
+    if captured.width == monitor.width
+        && captured.height == monitor.height
+        && captured.work_x == monitor_work_x
+        && captured.work_y == monitor_work_y
+        && captured.work_width == monitor.work_width
+        && captured.work_height == monitor.work_height
+    {
+        return layout.clone();
+    }
+
+    let saved_in_work_area = layout.x >= captured.work_x
+        && layout.y >= captured.work_y
+        && layout.x.saturating_add(layout.width)
+            <= captured.work_x.saturating_add(captured.work_width)
+        && layout.y.saturating_add(layout.height)
+            <= captured.work_y.saturating_add(captured.work_height)
+        && captured.work_width > 0
+        && captured.work_height > 0
+        && monitor.work_width > 0
+        && monitor.work_height > 0;
+
+    if saved_in_work_area {
+        let scale_x = monitor.work_width as f64 / captured.work_width as f64;
+        let scale_y = monitor.work_height as f64 / captured.work_height as f64;
+        return LayoutRect {
+            x: monitor_work_x + scale_i32(layout.x.saturating_sub(captured.work_x), scale_x),
+            y: monitor_work_y + scale_i32(layout.y.saturating_sub(captured.work_y), scale_y),
+            width: scale_i32(layout.width, scale_x),
+            height: scale_i32(layout.height, scale_y),
+        };
+    }
+
+    let scale_x = monitor.width as f64 / captured.width as f64;
+    let scale_y = monitor.height as f64 / captured.height as f64;
+    LayoutRect {
+        x: scale_i32(layout.x, scale_x),
+        y: scale_i32(layout.y, scale_y),
+        width: scale_i32(layout.width, scale_x),
+        height: scale_i32(layout.height, scale_y),
+    }
+}
+
+fn keep_layout_visible_on_monitor(layout: &LayoutRect, monitor: &MonitorInfo) -> LayoutRect {
+    let monitor_width = monitor.width.max(1);
+    let monitor_height = monitor.height.max(1);
+    let width = layout.width.clamp(80.min(monitor_width), monitor_width);
+    let height = layout.height.clamp(80.min(monitor_height), monitor_height);
+    let candidate = LayoutRect {
+        x: layout.x,
+        y: layout.y,
+        width,
+        height,
+    };
+    if layout_has_usable_visible_area(&candidate, monitor) {
+        return candidate;
+    }
+
+    let x = layout.x.clamp(0, monitor_width.saturating_sub(width));
+    let y = layout.y.clamp(0, monitor_height.saturating_sub(height));
+
+    LayoutRect {
+        x,
+        y,
+        width,
+        height,
+    }
+}
+
+fn layout_has_usable_visible_area(layout: &LayoutRect, monitor: &MonitorInfo) -> bool {
+    let right = layout.x.saturating_add(layout.width);
+    let bottom = layout.y.saturating_add(layout.height);
+    let visible_width = right.min(monitor.width).saturating_sub(layout.x.max(0));
+    let visible_height = bottom.min(monitor.height).saturating_sub(layout.y.max(0));
+    let min_visible_width = layout.width.min(80);
+    let min_visible_height = layout.height.min(80);
+
+    visible_width >= min_visible_width && visible_height >= min_visible_height
+}
+
 fn scaled_layout_for_monitor(
     profile: &Profile,
     app: &AppConfig,
     monitor: &MonitorInfo,
 ) -> LayoutRect {
-    let Some((canvas_width, canvas_height)) = profile_layout_canvas(profile) else {
+    let Some((canvas_x, canvas_y, canvas_width, canvas_height)) = profile_layout_canvas(profile)
+    else {
         return app.layout.clone();
     };
     if canvas_width <= 0 || canvas_height <= 0 || monitor.width <= 0 || monitor.height <= 0 {
@@ -1059,8 +1433,10 @@ fn scaled_layout_for_monitor(
 
     let scale_x = monitor.width as f64 / canvas_width as f64;
     let scale_y = monitor.height as f64 / canvas_height as f64;
-    let x = scale_i32(app.layout.x, scale_x).clamp(0, monitor.width.saturating_sub(1));
-    let y = scale_i32(app.layout.y, scale_y).clamp(0, monitor.height.saturating_sub(1));
+    let x = scale_i32(app.layout.x.saturating_sub(canvas_x), scale_x)
+        .clamp(0, monitor.width.saturating_sub(1));
+    let y = scale_i32(app.layout.y.saturating_sub(canvas_y), scale_y)
+        .clamp(0, monitor.height.saturating_sub(1));
     let available_width = (monitor.width - x).max(1);
     let available_height = (monitor.height - y).max(1);
     let width =
@@ -1076,7 +1452,9 @@ fn scaled_layout_for_monitor(
     }
 }
 
-fn profile_layout_canvas(profile: &Profile) -> Option<(i32, i32)> {
+fn profile_layout_canvas(profile: &Profile) -> Option<(i32, i32, i32, i32)> {
+    let left = profile.apps.iter().map(|app| app.layout.x).min()?.min(0);
+    let top = profile.apps.iter().map(|app| app.layout.y).min()?.min(0);
     let right = profile
         .apps
         .iter()
@@ -1087,7 +1465,31 @@ fn profile_layout_canvas(profile: &Profile) -> Option<(i32, i32)> {
         .iter()
         .map(|app| app.layout.y.saturating_add(app.layout.height))
         .max()?;
-    Some((right.max(1), bottom.max(1)))
+    Some((
+        left,
+        top,
+        right.saturating_sub(left).max(1),
+        bottom.saturating_sub(top).max(1),
+    ))
+}
+
+fn nearest_monitor_for_profile(profile: &Profile, monitors: &[MonitorInfo]) -> Option<MonitorInfo> {
+    let Some((_, _, canvas_width, canvas_height)) = profile_layout_canvas(profile) else {
+        return monitors
+            .iter()
+            .find(|monitor| monitor.is_primary)
+            .cloned()
+            .or_else(|| monitors.first().cloned());
+    };
+    monitors
+        .iter()
+        .min_by_key(|monitor| {
+            let width_delta = i64::from(monitor.width).abs_diff(i64::from(canvas_width));
+            let height_delta = i64::from(monitor.height).abs_diff(i64::from(canvas_height));
+            (width_delta.saturating_add(height_delta), monitor.is_primary)
+        })
+        .cloned()
+        .or_else(|| monitors.first().cloned())
 }
 
 fn scale_i32(value: i32, scale: f64) -> i32 {
@@ -1107,6 +1509,32 @@ fn app_result(
         message,
         matched_windows,
     }
+}
+
+fn move_failed_result(
+    config_dir: &Path,
+    profile: &Profile,
+    app: &AppConfig,
+    matched: Vec<WindowInfo>,
+    error: AppError,
+    log_events: bool,
+) -> AppRestoreResult {
+    let message = error.to_string();
+    let status = if message.to_ascii_lowercase().contains("access") {
+        AppRestoreStatus::PermissionDenied
+    } else {
+        AppRestoreStatus::MoveFailed
+    };
+    if log_events {
+        let _ = logging::append(
+            config_dir,
+            LogSeverity::Error,
+            Some(&profile.name),
+            Some(&app.display_name),
+            &message,
+        );
+    }
+    app_result(app, status, message, matched)
 }
 
 #[cfg(test)]
@@ -1144,12 +1572,12 @@ mod tests {
             title_rule: None,
             class_name: None,
             target_monitor_id: None,
+            captured_display: None,
             layout: LayoutRect::default(),
             window_state: WindowStatePreference::Normal,
             launch_delay_seconds: 0,
             detection_timeout_seconds: 1,
             retry_interval_ms: 100,
-            launch_if_missing: false,
             move_if_running: true,
             force_resize: true,
             apply_to_all_matching_windows: false,
@@ -1173,6 +1601,7 @@ mod tests {
             height: 100,
             is_visible: true,
             is_minimized: false,
+            is_maximized: false,
         };
 
         assert!(!window_matches_app(&window, &app, None));
@@ -1185,7 +1614,7 @@ mod tests {
         app.pull_hidden_windows = true;
         let window = WindowInfo {
             handle: "0x1".into(),
-            title: "OBS Studio".into(),
+            title: "OBS 32.1.2 - Profile: Untitled - Scenes: Untitled".into(),
             class_name: "QtWindow".into(),
             process_id: 10,
             process_name: "obs64.exe".into(),
@@ -1197,6 +1626,7 @@ mod tests {
             height: 100,
             is_visible: false,
             is_minimized: false,
+            is_maximized: false,
         };
 
         assert!(window_matches_app(&window, &app, None));
@@ -1220,6 +1650,7 @@ mod tests {
             height: 100,
             is_visible: true,
             is_minimized: false,
+            is_maximized: false,
         };
 
         assert!(!should_show_matched_windows(&app, &[window]));
@@ -1242,6 +1673,7 @@ mod tests {
             height: 100,
             is_visible: false,
             is_minimized: false,
+            is_maximized: false,
         };
 
         assert!(should_restore_through_qt_tray(&app, &[window.clone()]));
@@ -1249,6 +1681,88 @@ mod tests {
         window.is_visible = true;
         window.is_minimized = true;
         assert!(!should_restore_through_qt_tray(&app, &[window]));
+    }
+
+    #[test]
+    fn caps_openlaunchdeck_launch_detection_timeout() {
+        let mut openlaunchdeck = AppConfig::new_preset(
+            "openlaunchdeck",
+            "OpenLaunchDeck",
+            "OpenLaunchDeck.exe",
+            LayoutRect::default(),
+        );
+        openlaunchdeck.detection_timeout_seconds = 25;
+        assert_eq!(launch_detection_timeout_seconds(&openlaunchdeck), 5);
+
+        let mut obs =
+            AppConfig::new_preset("obs", "OBS Studio", "obs64.exe", LayoutRect::default());
+        obs.detection_timeout_seconds = 25;
+        assert_eq!(launch_detection_timeout_seconds(&obs), 25);
+    }
+
+    #[test]
+    fn launched_apps_wait_past_small_splash_windows() {
+        let mut app = AppConfig::new_preset(
+            "vesktop",
+            "Vesktop",
+            "vesktop.exe",
+            LayoutRect {
+                x: 1920,
+                y: 0,
+                width: 1920,
+                height: 1080,
+            },
+        );
+        let mut window = WindowInfo {
+            handle: "0x1".into(),
+            title: "Loading".into(),
+            class_name: "Chrome_WidgetWin_1".into(),
+            process_id: 10,
+            process_name: "vesktop.exe".into(),
+            executable_path: None,
+            monitor_id: None,
+            x: 0,
+            y: 0,
+            width: 320,
+            height: 320,
+            is_visible: true,
+            is_minimized: false,
+            is_maximized: false,
+        };
+
+        assert!(!launch_window_is_ready(&app, &window));
+
+        window.width = 1600;
+        window.height = 900;
+        assert!(launch_window_is_ready(&app, &window));
+
+        app.force_resize = false;
+        window.width = 320;
+        window.height = 320;
+        assert!(launch_window_is_ready(&app, &window));
+    }
+
+    #[test]
+    fn openlaunchdeck_restore_launch_requests_visible_window() {
+        let mut app = AppConfig::new_preset(
+            "openlaunchdeck",
+            "OpenLaunchDeck",
+            "OpenLaunchDeck.exe",
+            LayoutRect::default(),
+        );
+        app.arguments = vec![
+            "--background".into(),
+            "--start-minimized".into(),
+            "--custom-option".into(),
+        ];
+
+        let launch_config = app_for_restore_launch(&app);
+
+        assert_eq!(
+            launch_config.arguments,
+            vec!["--custom-option".to_string(), "--show".to_string()]
+        );
+        assert_eq!(app.arguments.len(), 3);
     }
 
     #[test]
@@ -1270,6 +1784,7 @@ mod tests {
             height: 100,
             is_visible: false,
             is_minimized: false,
+            is_maximized: false,
         };
 
         assert!(!window_matches_app(&window, &app, None));
@@ -1294,6 +1809,7 @@ mod tests {
             height: 800,
             is_visible: true,
             is_minimized: false,
+            is_maximized: false,
         };
 
         assert!(window_matches_app(&window, &app, None));
@@ -1318,6 +1834,36 @@ mod tests {
             height: 500,
             is_visible: true,
             is_minimized: false,
+            is_maximized: false,
+        };
+
+        assert!(!window_matches_app(&window, &app, None));
+    }
+
+    #[test]
+    fn broad_obs_title_rule_still_rejects_tool_windows() {
+        let mut app =
+            AppConfig::new_preset("obs", "OBS Studio", "obs64.exe", LayoutRect::default());
+        app.title_rule = Some(MatchRule {
+            mode: TitleMatchMode::StartsWith,
+            value: "OBS".into(),
+            case_sensitive: false,
+        });
+        let window = WindowInfo {
+            handle: "0x1".into(),
+            title: "OBS Stats".into(),
+            class_name: "Qt683QWindowIcon".into(),
+            process_id: 10,
+            process_name: "obs64.exe".into(),
+            executable_path: None,
+            monitor_id: None,
+            x: 0,
+            y: 0,
+            width: 420,
+            height: 500,
+            is_visible: true,
+            is_minimized: false,
+            is_maximized: false,
         };
 
         assert!(!window_matches_app(&window, &app, None));
@@ -1346,6 +1892,7 @@ mod tests {
             height: 500,
             is_visible: true,
             is_minimized: false,
+            is_maximized: false,
         };
 
         assert!(window_matches_app(&window, &app, None));
@@ -1393,6 +1940,7 @@ mod tests {
             height: 719,
             is_visible: true,
             is_minimized: false,
+            is_maximized: false,
         };
 
         assert!(window_layout_is_current(
@@ -1416,7 +1964,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_profile_monitor_uses_secondary_nearest_match() {
+    fn missing_profile_monitor_uses_closest_resolution() {
         let mut config = WindowAutoLayoutConfig::default();
         config.global.monitor_missing_behavior = MonitorMissingBehavior::NearestMatch;
         config.profiles[0].target_monitor_id = Some("missing-display".into());
@@ -1428,8 +1976,29 @@ mod tests {
         let resolved = resolve_profile_monitor(&config, &config.profiles[0], &monitors)
             .expect("fallback monitor");
 
-        assert_eq!(resolved.monitor.id, "secondary");
+        assert_eq!(resolved.monitor.id, "primary");
         assert!(resolved.is_fallback);
+    }
+
+    #[test]
+    fn nearest_monitor_prefers_matching_profile_canvas() {
+        let mut profile = WindowAutoLayoutConfig::default().profiles.remove(0);
+        profile.apps[0].layout = LayoutRect {
+            x: 0,
+            y: 0,
+            width: 2560,
+            height: 1440,
+        };
+        profile.apps.truncate(1);
+        let monitors = vec![
+            test_monitor("primary", true, 0, 0, 1920, 1080),
+            test_monitor("portrait", false, 1920, 0, 1080, 1920),
+            test_monitor("matching", false, -2560, 0, 2560, 1440),
+        ];
+
+        let resolved = nearest_monitor_for_profile(&profile, &monitors).expect("nearest monitor");
+
+        assert_eq!(resolved.id, "matching");
     }
 
     #[test]
@@ -1475,8 +2044,6 @@ mod tests {
                     },
                 ),
             ],
-            startup_restore: true,
-            enforce_after_restore: true,
         };
         let editor = profile.apps.pop().expect("editor app");
 
@@ -1494,54 +2061,216 @@ mod tests {
     }
 
     #[test]
-    fn profile_signature_changes_when_tracked_window_moves_or_minimizes() {
-        let profile = Profile {
-            id: "profile".into(),
-            name: "Streaming".into(),
-            description: None,
-            target_monitor_id: None,
-            apps: vec![AppConfig::new_preset(
-                "discord",
-                "Discord",
-                "Discord.exe",
-                LayoutRect::default(),
-            )],
-            startup_restore: true,
-            enforce_after_restore: true,
-        };
-        let window = WindowInfo {
-            handle: "0x1".into(),
-            title: "Discord".into(),
-            class_name: "Chrome_WidgetWin_1".into(),
-            process_id: 10,
-            process_name: "Discord.exe".into(),
-            executable_path: None,
-            monitor_id: None,
-            x: 0,
-            y: 0,
-            width: 1000,
-            height: 700,
-            is_visible: true,
-            is_minimized: false,
-        };
-        let moved = WindowInfo {
-            x: 20,
-            ..window.clone()
-        };
-        let minimized = WindowInfo {
-            is_minimized: true,
-            ..window.clone()
+    fn keeps_exact_layout_when_it_still_intersects_monitor() {
+        let monitor = test_monitor("display", true, 0, 0, 1920, 1080);
+        let layout = LayoutRect {
+            x: -20,
+            y: 10,
+            width: 800,
+            height: 600,
         };
 
-        let base = profile_window_signature_from_windows(&profile, &[window]);
-        assert_ne!(
-            base,
-            profile_window_signature_from_windows(&profile, &[moved])
+        assert_eq!(keep_layout_visible_on_monitor(&layout, &monitor), layout);
+    }
+
+    #[test]
+    fn clamps_layout_back_when_saved_bounds_miss_target_monitor() {
+        let monitor = test_monitor("display", true, 0, 0, 1920, 1080);
+        let layout = LayoutRect {
+            x: 2400,
+            y: 1300,
+            width: 900,
+            height: 700,
+        };
+
+        assert_eq!(
+            keep_layout_visible_on_monitor(&layout, &monitor),
+            LayoutRect {
+                x: 1020,
+                y: 380,
+                width: 900,
+                height: 700,
+            }
         );
-        assert_ne!(
-            base,
-            profile_window_signature_from_windows(&profile, &[minimized])
+    }
+
+    #[test]
+    fn clamps_layout_back_when_only_a_tiny_edge_is_visible() {
+        let monitor = test_monitor("display", true, 0, 0, 1920, 1080);
+        let layout = LayoutRect {
+            x: 1870,
+            y: 20,
+            width: 900,
+            height: 700,
+        };
+
+        assert_eq!(
+            keep_layout_visible_on_monitor(&layout, &monitor),
+            LayoutRect {
+                x: 1020,
+                y: 20,
+                width: 900,
+                height: 700,
+            }
         );
+    }
+
+    #[test]
+    fn clamps_oversized_layout_to_current_monitor_resolution() {
+        let monitor = test_monitor("display", true, 0, 0, 1920, 1080);
+        let layout = LayoutRect {
+            x: 0,
+            y: 0,
+            width: 3840,
+            height: 2160,
+        };
+
+        assert_eq!(
+            keep_layout_visible_on_monitor(&layout, &monitor),
+            LayoutRect {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1080,
+            }
+        );
+    }
+
+    #[test]
+    fn fallback_scaling_accounts_for_negative_saved_offsets() {
+        let monitor = test_monitor("display", true, 0, 0, 1000, 500);
+        let app = AppConfig::new_preset(
+            "editor",
+            "Editor",
+            "Editor.exe",
+            LayoutRect {
+                x: -100,
+                y: -50,
+                width: 1000,
+                height: 500,
+            },
+        );
+        let profile = Profile {
+            id: "profile".into(),
+            name: "Profile".into(),
+            description: None,
+            target_monitor_id: None,
+            apps: vec![app.clone()],
+        };
+
+        assert_eq!(
+            scaled_layout_for_monitor(&profile, &app, &monitor),
+            LayoutRect {
+                x: 0,
+                y: 0,
+                width: 1000,
+                height: 500,
+            }
+        );
+    }
+
+    #[test]
+    fn captured_display_scales_full_monitor_layout_after_resolution_change() {
+        let monitor = test_monitor("display", true, 0, 0, 1920, 1080);
+        let captured = CapturedDisplay {
+            width: 3840,
+            height: 2160,
+            work_x: 0,
+            work_y: 0,
+            work_width: 3840,
+            work_height: 2080,
+            scale_percent: 150,
+        };
+        let layout = LayoutRect {
+            x: 1920,
+            y: 1080,
+            width: 1920,
+            height: 1080,
+        };
+
+        assert_eq!(
+            scaled_layout_from_captured_display(&layout, &captured, &monitor),
+            LayoutRect {
+                x: 960,
+                y: 540,
+                width: 960,
+                height: 540,
+            }
+        );
+    }
+
+    #[test]
+    fn captured_display_maps_work_area_layout_around_the_current_taskbar() {
+        let mut monitor = test_monitor("display", true, 0, 0, 2560, 1440);
+        monitor.work_y = 48;
+        monitor.work_height = 1392;
+        let captured = CapturedDisplay {
+            width: 1920,
+            height: 1080,
+            work_x: 0,
+            work_y: 0,
+            work_width: 1920,
+            work_height: 1040,
+            scale_percent: 100,
+        };
+        let layout = LayoutRect {
+            x: 0,
+            y: 0,
+            width: 960,
+            height: 1040,
+        };
+
+        assert_eq!(
+            scaled_layout_from_captured_display(&layout, &captured, &monitor),
+            LayoutRect {
+                x: 0,
+                y: 48,
+                width: 1280,
+                height: 1392,
+            }
+        );
+    }
+
+    #[test]
+    fn captured_display_tracks_taskbar_moves_at_the_same_resolution() {
+        let mut monitor = test_monitor("display", true, 0, 0, 1920, 1080);
+        monitor.work_y = 40;
+        monitor.work_height = 1040;
+        let captured = CapturedDisplay {
+            width: 1920,
+            height: 1080,
+            work_x: 0,
+            work_y: 0,
+            work_width: 1920,
+            work_height: 1040,
+            scale_percent: 100,
+        };
+        let layout = LayoutRect {
+            x: 0,
+            y: 0,
+            width: 960,
+            height: 1040,
+        };
+
+        assert_eq!(
+            scaled_layout_from_captured_display(&layout, &captured, &monitor),
+            LayoutRect {
+                x: 0,
+                y: 40,
+                width: 960,
+                height: 1040,
+            }
+        );
+    }
+
+    #[test]
+    fn paused_restore_has_an_explicit_non_success_status() {
+        let profile = WindowAutoLayoutConfig::default().profiles.remove(0);
+
+        let result = paused_restore_result(profile, Utc::now());
+
+        assert_eq!(result.status, RestoreStatus::Paused);
+        assert!(result.results.is_empty());
     }
 
     fn test_monitor(

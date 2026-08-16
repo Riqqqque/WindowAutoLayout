@@ -1,15 +1,15 @@
 export type MonitorMissingBehavior =
   | "doNothing"
   | "usePrimary"
-  | "nearestMatch"
-  | "askNextOpen";
+  | "nearestMatch";
 
 export type WindowStatePreference = "normal" | "maximized" | "minimized";
 export type TitleMatchMode = "contains" | "exact" | "startsWith" | "endsWith" | "regex";
-export type RestoreStatus = "success" | "partialSuccess" | "failed" | "monitorMissing";
+export type RestoreStatus = "success" | "partialSuccess" | "paused" | "failed" | "monitorMissing";
 export type AppRestoreStatus =
   | "success"
   | "skipped"
+  | "paused"
   | "launched"
   | "launchedWindowNotFound"
   | "processRunningWindowNotFound"
@@ -19,12 +19,23 @@ export type AppRestoreStatus =
   | "moveFailed"
   | "failed";
 export type LogSeverity = "info" | "warn" | "error";
+export type TrayClickAction = "openWindow" | "restoreLayout";
 
 export interface LayoutRect {
   x: number;
   y: number;
   width: number;
   height: number;
+}
+
+export interface CapturedDisplay {
+  width: number;
+  height: number;
+  workX: number;
+  workY: number;
+  workWidth: number;
+  workHeight: number;
+  scalePercent: number;
 }
 
 export interface MatchRule {
@@ -43,12 +54,12 @@ export interface AppConfig {
   titleRule?: MatchRule | null;
   className?: string | null;
   targetMonitorId?: string | null;
+  capturedDisplay?: CapturedDisplay | null;
   layout: LayoutRect;
   windowState: WindowStatePreference;
   launchDelaySeconds: number;
   detectionTimeoutSeconds: number;
   retryIntervalMs: number;
-  launchIfMissing: boolean;
   moveIfRunning: boolean;
   forceResize: boolean;
   applyToAllMatchingWindows: boolean;
@@ -65,15 +76,11 @@ export interface Profile {
   description?: string | null;
   targetMonitorId?: string | null;
   apps: AppConfig[];
-  startupRestore: boolean;
-  enforceAfterRestore: boolean;
 }
 
 export interface GlobalSettings {
   defaultMonitorId?: string | null;
   monitorMissingBehavior: MonitorMissingBehavior;
-  warnWhenMonitorMissing: boolean;
-  advancedMode: boolean;
 }
 
 export interface StartupSettings {
@@ -83,26 +90,18 @@ export interface StartupSettings {
   delaySeconds: number;
   restoreOnLaunch: boolean;
   launchMissingApps: boolean;
-  enforceAfterStartup: boolean;
 }
 
 export interface TraySettings {
   minimizeToTrayOnClose: boolean;
-  showRestoreStatus: boolean;
-}
-
-export interface HotkeySettings {
-  enabled: boolean;
-  accelerator: string;
-  restoreWithoutOpening: boolean;
+  leftClickAction: TrayClickAction;
 }
 
 export interface EnforcementSettings {
   enabled: boolean;
   profileId?: string | null;
-  durationSeconds: number;
-  intervalMs: number;
-  pauseForFullscreenGames: boolean;
+  restoreOnDesktopReveal: boolean;
+  restoreAfterGameExit: boolean;
 }
 
 export interface WindowAutoLayoutConfig {
@@ -111,7 +110,6 @@ export interface WindowAutoLayoutConfig {
   global: GlobalSettings;
   startup: StartupSettings;
   tray: TraySettings;
-  hotkey: HotkeySettings;
   enforcement: EnforcementSettings;
   profiles: Profile[];
 }
@@ -146,6 +144,7 @@ export interface WindowInfo {
   height: number;
   isVisible: boolean;
   isMinimized: boolean;
+  isMaximized: boolean;
 }
 
 export interface AppRestoreResult {
@@ -164,6 +163,14 @@ export interface RestoreResult {
   finishedAt: string;
   monitor?: MonitorInfo | null;
   results: AppRestoreResult[];
+}
+
+export interface RuntimeStatus {
+  automaticRestoreEnabled: boolean;
+  automaticRestoreProfileId?: string | null;
+  automaticRestoreProfileName?: string | null;
+  restoring: boolean;
+  startupRegistered: boolean;
 }
 
 export interface CapturedWindowSummary {
