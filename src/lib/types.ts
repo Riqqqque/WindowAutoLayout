@@ -19,12 +19,23 @@ export type AppRestoreStatus =
   | "moveFailed"
   | "failed";
 export type LogSeverity = "info" | "warn" | "error";
+export type TrayClickAction = "openWindow" | "restoreLayout";
 
 export interface LayoutRect {
   x: number;
   y: number;
   width: number;
   height: number;
+}
+
+export interface CapturedDisplay {
+  width: number;
+  height: number;
+  workX: number;
+  workY: number;
+  workWidth: number;
+  workHeight: number;
+  scalePercent: number;
 }
 
 export interface MatchRule {
@@ -43,6 +54,7 @@ export interface AppConfig {
   titleRule?: MatchRule | null;
   className?: string | null;
   targetMonitorId?: string | null;
+  capturedDisplay?: CapturedDisplay | null;
   layout: LayoutRect;
   windowState: WindowStatePreference;
   launchDelaySeconds: number;
@@ -82,11 +94,14 @@ export interface StartupSettings {
 
 export interface TraySettings {
   minimizeToTrayOnClose: boolean;
+  leftClickAction: TrayClickAction;
 }
 
 export interface EnforcementSettings {
   enabled: boolean;
   profileId?: string | null;
+  restoreOnDesktopReveal: boolean;
+  restoreAfterGameExit: boolean;
 }
 
 export interface WindowAutoLayoutConfig {
@@ -148,6 +163,14 @@ export interface RestoreResult {
   finishedAt: string;
   monitor?: MonitorInfo | null;
   results: AppRestoreResult[];
+}
+
+export interface RuntimeStatus {
+  automaticRestoreEnabled: boolean;
+  automaticRestoreProfileId?: string | null;
+  automaticRestoreProfileName?: string | null;
+  restoring: boolean;
+  startupRegistered: boolean;
 }
 
 export interface CapturedWindowSummary {

@@ -5,6 +5,7 @@ import type {
   LogEntry,
   MonitorInfo,
   RestoreResult,
+  RuntimeStatus,
   WindowAutoLayoutConfig,
   WindowInfo,
 } from "./types";
@@ -12,8 +13,8 @@ import type {
 export const isTauriRuntime = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 const browserConfig: WindowAutoLayoutConfig = {
-  schemaVersion: 5,
-  appVersion: "0.1.23",
+  schemaVersion: 7,
+  appVersion: "0.1.28",
   global: {
     defaultMonitorId: "display-2",
     monitorMissingBehavior: "nearestMatch",
@@ -26,8 +27,13 @@ const browserConfig: WindowAutoLayoutConfig = {
     restoreOnLaunch: true,
     launchMissingApps: true,
   },
-  tray: { minimizeToTrayOnClose: true },
-  enforcement: { enabled: false, profileId: "profile-streaming" },
+  tray: { minimizeToTrayOnClose: true, leftClickAction: "openWindow" },
+  enforcement: {
+    enabled: false,
+    profileId: "profile-streaming",
+    restoreOnDesktopReveal: true,
+    restoreAfterGameExit: true,
+  },
   profiles: [
     {
       id: "profile-streaming",
@@ -45,6 +51,7 @@ const browserConfig: WindowAutoLayoutConfig = {
           titleRule: { mode: "startsWith", value: "OBS", caseSensitive: false },
           className: null,
           targetMonitorId: null,
+          capturedDisplay: null,
           layout: { x: 0, y: 0, width: 1280, height: 720 },
           windowState: "normal",
           launchDelaySeconds: 0,
@@ -69,6 +76,7 @@ const browserConfig: WindowAutoLayoutConfig = {
           titleRule: null,
           className: null,
           targetMonitorId: null,
+          capturedDisplay: null,
           layout: { x: 1280, y: 0, width: 640, height: 720 },
           windowState: "normal",
           launchDelaySeconds: 0,
@@ -93,6 +101,7 @@ const browserConfig: WindowAutoLayoutConfig = {
           titleRule: { mode: "contains", value: "GitHub Desktop", caseSensitive: false },
           className: null,
           targetMonitorId: null,
+          capturedDisplay: null,
           layout: { x: 80, y: 80, width: 1280, height: 900 },
           windowState: "normal",
           launchDelaySeconds: 0,
@@ -210,6 +219,7 @@ const realApi = {
   setLayoutLock: (enabled: boolean, profileId?: string) =>
     invoke<boolean>("set_layout_lock", { enabled, profileId }),
   layoutLockStatus: () => invoke<boolean>("layout_lock_enabled"),
+  runtimeStatus: () => invoke<RuntimeStatus>("runtime_status"),
   saveWindowLayout: (profileId: string, appId: string, windowHandle: string) =>
     invoke<WindowAutoLayoutConfig>("save_window_layout", { profileId, appId, windowHandle }),
   saveAllCurrentLayouts: (profileId: string) =>
@@ -263,6 +273,14 @@ const browserApi = {
     return browserLayoutLocked;
   },
   layoutLockStatus: async () => browserLayoutLocked,
+  runtimeStatus: async (): Promise<RuntimeStatus> => ({
+    automaticRestoreEnabled: browserLayoutLocked,
+    automaticRestoreProfileId: browserConfig.enforcement.profileId,
+    automaticRestoreProfileName:
+      browserConfig.profiles.find((profile) => profile.id === browserConfig.enforcement.profileId)?.name ?? null,
+    restoring: false,
+    startupRegistered: browserConfig.startup.enabled,
+  }),
   saveWindowLayout: async () => browserConfig,
   saveAllCurrentLayouts: async () => browserConfig,
   captureCurrentLayout: async (profileId: string, monitorId: string): Promise<CaptureLayoutResult> => {
@@ -282,6 +300,15 @@ const browserApi = {
       titleRule: window.processName === "obs64.exe" ? { mode: "startsWith", value: "OBS", caseSensitive: false } : null,
       className: window.className,
       targetMonitorId: monitor.id,
+      capturedDisplay: {
+        width: monitor.width,
+        height: monitor.height,
+        workX: monitor.workX - monitor.x,
+        workY: monitor.workY - monitor.y,
+        workWidth: monitor.workWidth,
+        workHeight: monitor.workHeight,
+        scalePercent: Math.round(monitor.scaleFactor * 100),
+      },
       layout: { x: window.x - monitor.x, y: window.y - monitor.y, width: window.width, height: window.height },
       windowState: window.isMaximized ? "maximized" : "normal",
       launchDelaySeconds: 0,

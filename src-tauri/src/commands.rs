@@ -7,13 +7,13 @@ use crate::{
     errors::{AppError, AppResult},
     layout_lock, logging,
     models::{
-        preset_apps, AppConfig, CaptureLayoutResult, CapturedWindowSummary, LogEntry, LogSeverity,
-        MatchRule, MonitorInfo, RestoreResult, TitleMatchMode, WindowAutoLayoutConfig, WindowInfo,
-        WindowStatePreference,
+        preset_apps, AppConfig, CaptureLayoutResult, CapturedDisplay, CapturedWindowSummary,
+        LogEntry, LogSeverity, MatchRule, MonitorInfo, RestoreResult, RuntimeStatus,
+        TitleMatchMode, WindowAutoLayoutConfig, WindowInfo, WindowStatePreference,
     },
     monitors, profiles, startup,
     state::AppState,
-    window_actions, windows_enum,
+    tray_ui, window_actions, windows_enum,
 };
 
 #[tauri::command]
@@ -53,13 +53,13 @@ pub fn save_config(
         .map_err(|_| AppError::Config("Config lock was poisoned".to_string()))? =
         next_config.clone();
     layout_lock::sync_from_config(&app, &next_config)?;
-    logging::append(
+    let _ = logging::append(
         &state.config_dir,
         LogSeverity::Info,
         None,
         None,
         "Settings saved",
-    )?;
+    );
     Ok(next_config)
 }
 
@@ -123,6 +123,11 @@ pub fn layout_lock_enabled(app: AppHandle) -> AppResult<bool> {
 }
 
 #[tauri::command]
+pub fn runtime_status(app: AppHandle) -> AppResult<RuntimeStatus> {
+    tray_ui::runtime_status(&app)
+}
+
+#[tauri::command]
 pub fn save_window_layout(
     state: State<'_, AppState>,
     profile_id: String,
@@ -135,7 +140,7 @@ pub fn save_window_layout(
     let monitor_id = window.monitor_id.clone().ok_or(AppError::MonitorNotFound)?;
     let monitor = monitors::list_monitors()?
         .into_iter()
-        .find(|monitor| monitor.id == monitor_id)
+        .find(|monitor| monitors::monitor_id_matches(monitor, &monitor_id))
         .ok_or(AppError::MonitorNotFound)?;
 
     let mut next_config = state
@@ -168,6 +173,7 @@ pub fn save_window_layout(
             bottom: window.y + window.height,
         },
     );
+    app.captured_display = Some(CapturedDisplay::from_monitor(&monitor));
     app.target_monitor_id = Some(monitor.id);
     if app
         .process_name
@@ -187,13 +193,13 @@ pub fn save_window_layout(
         .lock()
         .map_err(|_| AppError::Config("Config lock was poisoned".to_string()))? =
         next_config.clone();
-    logging::append(
+    let _ = logging::append(
         &state.config_dir,
         LogSeverity::Info,
         Some(&profile_id),
         Some(&app_id),
         "Captured window layout",
-    )?;
+    );
     Ok(next_config)
 }
 
@@ -224,7 +230,10 @@ pub fn save_all_current_layouts(
         let Some(monitor_id) = &window.monitor_id else {
             continue;
         };
-        let Some(monitor) = monitors.iter().find(|monitor| &monitor.id == monitor_id) else {
+        let Some(monitor) = monitors
+            .iter()
+            .find(|monitor| monitors::monitor_id_matches(monitor, monitor_id))
+        else {
             continue;
         };
         app.layout = window_actions::relative_rect(
@@ -236,6 +245,7 @@ pub fn save_all_current_layouts(
                 bottom: window.y + window.height,
             },
         );
+        app.captured_display = Some(CapturedDisplay::from_monitor(monitor));
         app.target_monitor_id = Some(monitor.id.clone());
         if profile.target_monitor_id.is_none() {
             profile.target_monitor_id = Some(monitor.id.clone());
@@ -248,13 +258,13 @@ pub fn save_all_current_layouts(
         .lock()
         .map_err(|_| AppError::Config("Config lock was poisoned".to_string()))? =
         next_config.clone();
-    logging::append(
+    let _ = logging::append(
         &state.config_dir,
         LogSeverity::Info,
         Some(&profile_id),
         None,
         "Captured layouts for matching configured apps",
-    )?;
+    );
     Ok(next_config)
 }
 
@@ -267,7 +277,7 @@ pub fn capture_current_layout(
     let monitors = monitors::list_monitors()?;
     let monitor = monitors
         .iter()
-        .find(|monitor| monitor.id == monitor_id)
+        .find(|monitor| monitors::monitor_id_matches(monitor, &monitor_id))
         .cloned()
         .ok_or(AppError::MonitorNotFound)?;
 
@@ -329,7 +339,7 @@ pub fn capture_current_layout(
         .lock()
         .map_err(|_| AppError::Config("Config lock was poisoned".to_string()))? =
         next_config.clone();
-    logging::append(
+    let _ = logging::append(
         &state.config_dir,
         LogSeverity::Info,
         Some(&profile_id),
@@ -339,7 +349,7 @@ pub fn capture_current_layout(
             summaries.len(),
             monitor.name
         ),
-    )?;
+    );
 
     Ok(CaptureLayoutResult {
         config: next_config,
@@ -378,6 +388,7 @@ fn captured_apps_for_windows(monitor: &MonitorInfo, windows: &[WindowInfo]) -> V
                 title_rule: title_rule_for_window(window, duplicate_process),
                 class_name,
                 target_monitor_id: Some(monitor.id.clone()),
+                captured_display: Some(CapturedDisplay::from_monitor(monitor)),
                 layout: window_actions::relative_rect(
                     monitor,
                     windows::Win32::Foundation::RECT {
@@ -544,6 +555,7 @@ pub fn startup_enabled() -> bool {
 
 #[tauri::command]
 pub fn set_startup_enabled(
+    app: AppHandle,
     state: State<'_, AppState>,
     enabled: bool,
 ) -> AppResult<WindowAutoLayoutConfig> {
@@ -560,6 +572,7 @@ pub fn set_startup_enabled(
         .lock()
         .map_err(|_| AppError::Config("Config lock was poisoned".to_string()))? =
         next_config.clone();
+    let _ = tray_ui::sync(&app);
     Ok(next_config)
 }
 

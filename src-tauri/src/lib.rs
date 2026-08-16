@@ -13,20 +13,25 @@ mod profiles;
 mod single_instance;
 mod startup;
 mod state;
+mod tray_ui;
 mod window_actions;
 mod windows_enum;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use tauri::{
-    menu::{Menu, MenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, WindowEvent,
+    Manager, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
 
 use crate::{
     logging::append,
-    models::{LogSeverity, WindowAutoLayoutConfig},
+    models::{LogSeverity, RestoreStatus, TrayClickAction, WindowAutoLayoutConfig},
     state::AppState,
 };
+
+static MAIN_WINDOW_OPENING: AtomicBool = AtomicBool::new(false);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -35,13 +40,13 @@ pub fn run() {
     };
     let activation_event_address = single_instance.activation_event_address();
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .device_event_filter(tauri::DeviceEventFilter::Always)
         .setup(move |app| {
             performance::lower_process_priority();
 
             let config_dir = app.path().app_config_dir()?;
-            let config = match config::load_or_create(&config_dir) {
+            let mut config = match config::load_or_create(&config_dir) {
                 Ok(config) => config,
                 Err(error) => {
                     let fallback = WindowAutoLayoutConfig::default();
@@ -55,6 +60,23 @@ pub fn run() {
                     fallback
                 }
             };
+            if let Ok(connected_monitors) = monitors::list_monitors() {
+                let targets_changed =
+                    config::reconcile_monitor_targets(&mut config, &connected_monitors);
+                let display_metadata_changed =
+                    config::hydrate_captured_displays(&mut config, &connected_monitors);
+                if targets_changed || display_metadata_changed {
+                    if let Err(error) = config::save(&config_dir, &config) {
+                        let _ = append(
+                            &config_dir,
+                            LogSeverity::Warn,
+                            None,
+                            None,
+                            format!("Could not save reconciled monitor settings: {error}"),
+                        );
+                    }
+                }
+            }
 
             app.manage(AppState::new(config_dir.clone(), config));
             let _ = append(
@@ -90,7 +112,6 @@ pub fn run() {
                 }
             }
 
-            wire_close_to_tray(app);
             build_tray(app)?;
             if let Some(event_address) = activation_event_address {
                 if let Err(error) =
@@ -126,6 +147,7 @@ pub fn run() {
             commands::parse_config_json,
             commands::read_logs,
             commands::restore_profile,
+            commands::runtime_status,
             commands::save_all_current_layouts,
             commands::save_config,
             commands::save_window_layout,
@@ -135,15 +157,19 @@ pub fn run() {
             commands::startup_enabled,
             commands::validate_current_config
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running WindowAutoLayout");
+        .build(tauri::generate_context!())
+        .expect("error while building WindowAutoLayout");
+
+    app.run(|_app, event| {
+        if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
+            if code.is_none() {
+                api.prevent_exit();
+            }
+        }
+    });
 }
 
-fn wire_close_to_tray(app: &tauri::App) {
-    let Some(window) = app.get_webview_window("main") else {
-        return;
-    };
-    let app_handle = app.handle().clone();
+fn wire_close_to_tray(app_handle: tauri::AppHandle, window: &WebviewWindow) {
     let window_to_hide = window.clone();
 
     window.on_window_event(move |event| {
@@ -162,6 +188,10 @@ fn wire_close_to_tray(app: &tauri::App) {
             if should_hide {
                 api.prevent_close();
                 let _ = window_to_hide.hide();
+                let window_to_destroy = window_to_hide.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = window_to_destroy.destroy();
+                });
             } else {
                 api.prevent_close();
                 app_handle.exit(0);
@@ -171,25 +201,54 @@ fn wire_close_to_tray(app: &tauri::App) {
 }
 
 fn build_tray(app: &tauri::App) -> tauri::Result<()> {
+    let automatic_restore_enabled = layout_lock::enabled(app.handle()).unwrap_or(false);
     let restore = MenuItem::with_id(
         app,
         "restore_default",
-        "Restore default profile",
+        "Restore windows now",
         true,
         None::<&str>,
     )?;
     let open = MenuItem::with_id(app, "open", "Open WindowAutoLayout", true, None::<&str>)?;
-    let logs = MenuItem::with_id(app, "logs", "Open logs", true, None::<&str>)?;
-    let lock = MenuItem::with_id(app, "layout_lock", "Toggle layout lock", true, None::<&str>)?;
+    let logs = MenuItem::with_id(app, "logs", "Open activity log", true, None::<&str>)?;
+    let automatic = CheckMenuItem::with_id(
+        app,
+        "layout_lock",
+        if automatic_restore_enabled {
+            "Automatic restore: On"
+        } else {
+            "Automatic restore: Off"
+        },
+        true,
+        automatic_restore_enabled,
+        None::<&str>,
+    )?;
+    let separator_one = PredefinedMenuItem::separator(app)?;
+    let separator_two = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", "Exit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&restore, &lock, &open, &logs, &quit])?;
+    let menu = Menu::with_items(
+        app,
+        &[
+            &restore,
+            &automatic,
+            &separator_one,
+            &open,
+            &logs,
+            &separator_two,
+            &quit,
+        ],
+    )?;
 
-    let mut builder = TrayIconBuilder::new()
-        .tooltip("WindowAutoLayout")
+    let mut builder = TrayIconBuilder::with_id(tray_ui::TRAY_ID)
+        .tooltip(if automatic_restore_enabled {
+            "WindowAutoLayout - Automatic restore on"
+        } else {
+            "WindowAutoLayout - Automatic restore off"
+        })
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
-            "restore_default" => restore_default_in_background(app.clone(), None, Some(true)),
+            "restore_default" => restore_default_in_background(app.clone(), None, None),
             "layout_lock" => toggle_layout_lock(app),
             "open" => show_main_window(app),
             "logs" => open_logs(app),
@@ -203,7 +262,11 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
                 ..
             } = event
             {
-                show_main_window(tray.app_handle());
+                if tray_left_click_restores(tray.app_handle()) {
+                    restore_default_in_background(tray.app_handle().clone(), None, None);
+                } else {
+                    show_main_window(tray.app_handle());
+                }
             }
         });
 
@@ -212,7 +275,29 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     }
 
     builder.build(app)?;
+    if let Err(error) = tray_ui::register(app.handle().clone(), restore, automatic) {
+        let state = app.state::<AppState>();
+        let _ = append(
+            &state.config_dir,
+            LogSeverity::Warn,
+            None,
+            None,
+            format!("Could not initialize tray status controls: {error}"),
+        );
+    }
     Ok(())
+}
+
+fn tray_left_click_restores(app: &tauri::AppHandle) -> bool {
+    app.try_state::<AppState>()
+        .and_then(|state| {
+            state
+                .config
+                .lock()
+                .ok()
+                .map(|config| config.tray.left_click_action.clone())
+        })
+        .is_some_and(|action| matches!(action, TrayClickAction::RestoreLayout))
 }
 
 fn maybe_startup_restore(app: tauri::AppHandle) {
@@ -248,7 +333,7 @@ fn maybe_startup_restore(app: tauri::AppHandle) {
         };
         let _ = tauri::async_runtime::spawn_blocking(move || {
             if let Err(error) =
-                profiles::restore_profile_background(&config_dir, &config, None, Some(true))
+                profiles::restore_profile_background(&config_dir, &config, None, None)
             {
                 let _ = append(
                     &config_dir,
@@ -280,6 +365,9 @@ fn restore_default_in_background(
     profile_id: Option<String>,
     launch_missing: Option<bool>,
 ) {
+    if tray_ui::restoring() {
+        return;
+    }
     let state = app.state::<AppState>();
     let config_dir = state.config_dir.clone();
     let config = match state.config.lock() {
@@ -306,27 +394,130 @@ fn restore_default_in_background(
 }
 
 fn toggle_layout_lock(app: &tauri::AppHandle) {
-    if let Err(error) = layout_lock::toggle(app, None) {
-        let state = app.state::<AppState>();
-        let _ = append(
-            &state.config_dir,
-            LogSeverity::Error,
-            None,
-            None,
-            format!("Could not toggle layout lock: {error}"),
-        );
+    if tray_ui::restoring() {
+        return;
     }
+    match layout_lock::enabled(app) {
+        Ok(true) => {
+            if let Err(error) = layout_lock::set(app, false, None) {
+                log_layout_lock_error(app, error);
+            }
+        }
+        Ok(false) => enable_layout_lock_in_background(app.clone()),
+        Err(error) => log_layout_lock_error(app, error),
+    }
+}
+
+fn enable_layout_lock_in_background(app: tauri::AppHandle) {
+    let state = app.state::<AppState>();
+    let config_dir = state.config_dir.clone();
+    let config = match state.config.lock() {
+        Ok(config) => config.clone(),
+        Err(_) => return,
+    };
+    let profile_id = config
+        .enforcement
+        .profile_id
+        .clone()
+        .or_else(|| config.startup.default_profile_id.clone());
+
+    tauri::async_runtime::spawn(async move {
+        let restore_profile_id = profile_id.clone();
+        let restore = tauri::async_runtime::spawn_blocking(move || {
+            profiles::restore_profile(&config_dir, &config, restore_profile_id, None)
+        })
+        .await;
+        match restore {
+            Ok(Ok(result))
+                if !matches!(
+                    result.status,
+                    RestoreStatus::Paused | RestoreStatus::Failed | RestoreStatus::MonitorMissing
+                ) =>
+            {
+                if let Err(error) = layout_lock::set(&app, true, Some(result.profile_id)) {
+                    log_layout_lock_error(&app, error);
+                }
+            }
+            Ok(Err(error)) => log_layout_lock_error(&app, error),
+            Err(error) => {
+                let state = app.state::<AppState>();
+                let _ = append(
+                    &state.config_dir,
+                    LogSeverity::Error,
+                    None,
+                    None,
+                    format!("Could not enable automatic restore: {error}"),
+                );
+            }
+            _ => {
+                let _ = tray_ui::sync(&app);
+            }
+        }
+    });
+}
+
+fn log_layout_lock_error(app: &tauri::AppHandle, error: impl std::fmt::Display) {
+    let state = app.state::<AppState>();
+    let _ = append(
+        &state.config_dir,
+        LogSeverity::Error,
+        None,
+        None,
+        format!("Could not change automatic restore: {error}"),
+    );
 }
 
 pub(crate) fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        if let Ok(hwnd) = window.hwnd() {
-            let hwnd = windows::Win32::Foundation::HWND(hwnd.0 as usize as *mut std::ffi::c_void);
-            unsafe {
-                let _ = windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd);
-            }
+        present_main_window(&window);
+        return;
+    }
+    if MAIN_WINDOW_OPENING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let result = create_main_window(&app);
+        MAIN_WINDOW_OPENING.store(false, Ordering::Release);
+        if let Err(error) = result {
+            let state = app.state::<AppState>();
+            let _ = append(
+                &state.config_dir,
+                LogSeverity::Error,
+                None,
+                None,
+                format!("Could not open WindowAutoLayout: {error}"),
+            );
+        }
+    });
+}
+
+fn create_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
+    if let Some(window) = app.get_webview_window("main") {
+        present_main_window(&window);
+        return Ok(());
+    }
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|config| config.label == "main")
+        .ok_or(tauri::Error::WindowNotFound)?;
+    let window = WebviewWindowBuilder::from_config(app, config)?.build()?;
+    wire_close_to_tray(app.clone(), &window);
+    present_main_window(&window);
+    Ok(())
+}
+
+fn present_main_window(window: &WebviewWindow) {
+    let _ = window.show();
+    let _ = window.unminimize();
+    if let Ok(hwnd) = window.hwnd() {
+        let hwnd = windows::Win32::Foundation::HWND(hwnd.0 as usize as *mut std::ffi::c_void);
+        unsafe {
+            let _ = windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd);
         }
     }
 }

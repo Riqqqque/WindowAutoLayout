@@ -6,6 +6,7 @@ use crate::{
     logging,
     models::{LogSeverity, WindowAutoLayoutConfig},
     state::AppState,
+    tray_ui,
 };
 
 pub fn enabled(app: &AppHandle) -> AppResult<bool> {
@@ -20,7 +21,7 @@ pub fn enabled(app: &AppHandle) -> AppResult<bool> {
 
 pub fn set(app: &AppHandle, enabled: bool, profile_id: Option<String>) -> AppResult<bool> {
     let state = app.state::<AppState>();
-    let next_config = {
+    {
         let mut lock = state
             .layout_lock
             .lock()
@@ -34,26 +35,29 @@ pub fn set(app: &AppHandle, enabled: bool, profile_id: Option<String>) -> AppRes
             .or_else(|| config.enforcement.profile_id.clone())
             .or_else(|| config.startup.default_profile_id.clone());
 
+        let mut next_config = config.clone();
+        next_config.enforcement.enabled = enabled;
+        next_config.enforcement.profile_id = next_profile_id.clone();
+        config::save(&state.config_dir, &next_config)?;
+
         lock.generation = lock.generation.wrapping_add(1);
         lock.enabled = enabled;
         lock.profile_id = next_profile_id.clone();
-        config.enforcement.enabled = enabled;
-        config.enforcement.profile_id = next_profile_id;
-        config.clone()
-    };
-    config::save(&state.config_dir, &next_config)?;
+        *config = next_config;
+    }
 
-    logging::append(
+    let _ = logging::append(
         &state.config_dir,
         LogSeverity::Info,
         None,
         None,
         if enabled {
-            "Event-driven layout lock enabled"
+            "Automatic restore enabled"
         } else {
-            "Layout lock disabled"
+            "Automatic restore disabled"
         },
-    )?;
+    );
+    let _ = tray_ui::sync(app);
 
     Ok(enabled)
 }
@@ -75,10 +79,8 @@ pub fn sync_from_config(app: &AppHandle, config: &WindowAutoLayoutConfig) -> App
         lock.enabled = config.enforcement.enabled;
         lock.profile_id = next_profile_id;
     }
+    drop(lock);
+    let _ = tray_ui::sync(app);
 
     Ok(())
-}
-
-pub fn toggle(app: &AppHandle, profile_id: Option<String>) -> AppResult<bool> {
-    set(app, !enabled(app)?, profile_id)
 }

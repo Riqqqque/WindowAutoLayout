@@ -66,21 +66,29 @@ export function MonitorPreview({
     );
   }
 
+  function finishDrag(event: React.PointerEvent) {
+    if (ref.current?.hasPointerCapture(event.pointerId)) {
+      ref.current.releasePointerCapture(event.pointerId);
+    }
+    setDrag(null);
+  }
+
   return (
     <div
       ref={ref}
       className={clsx(
-        "relative aspect-video min-h-[300px] overflow-hidden rounded-md border border-[#3a4854] bg-[#090e12]",
+        "relative min-h-[300px] overflow-hidden rounded-md border border-[#3a4854] bg-[#090e12]",
         showGrid && "monitor-grid",
       )}
+      style={{ aspectRatio: `${canvas.width} / ${canvas.height}`, touchAction: "none" }}
       onPointerMove={(event) => {
         if (!drag) return;
         const app = apps.find((item) => item.id === drag.appId);
         if (!app) return;
         onChange?.(app.id, pointerToLayout(event, app.layout));
       }}
-      onPointerUp={() => setDrag(null)}
-      onPointerLeave={() => setDrag(null)}
+      onPointerUp={finishDrag}
+      onPointerCancel={finishDrag}
     >
       <div className="absolute bottom-3 left-3 z-30 rounded border border-[#34424d] bg-[#0b1014] px-2 py-1 text-xs text-[#a6b3bb]">
         {monitor ? `${monitor.width} x ${monitor.height}` : "Preview"}
@@ -116,6 +124,7 @@ export function MonitorPreview({
               onSelect?.(app.id);
               const bounds = ref.current?.getBoundingClientRect();
               if (!bounds) return;
+              ref.current?.setPointerCapture(event.pointerId);
               const scaleX = canvas.width / bounds.width;
               const scaleY = canvas.height / bounds.height;
               setDrag({
@@ -143,6 +152,7 @@ export function MonitorPreview({
                 event.preventDefault();
                 event.stopPropagation();
                 onSelect?.(app.id);
+                ref.current?.setPointerCapture(event.pointerId);
                 setDrag({ appId: app.id, mode: "resize", offsetX: 0, offsetY: 0 });
               }}
             />

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const CONFIG_SCHEMA_VERSION: u32 = 5;
+pub const CONFIG_SCHEMA_VERSION: u32 = 7;
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -64,6 +64,14 @@ pub enum LogSeverity {
     Error,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum TrayClickAction {
+    #[default]
+    OpenWindow,
+    RestoreLayout,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LayoutRect {
@@ -71,6 +79,32 @@ pub struct LayoutRect {
     pub y: i32,
     pub width: i32,
     pub height: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CapturedDisplay {
+    pub width: i32,
+    pub height: i32,
+    pub work_x: i32,
+    pub work_y: i32,
+    pub work_width: i32,
+    pub work_height: i32,
+    pub scale_percent: u32,
+}
+
+impl CapturedDisplay {
+    pub fn from_monitor(monitor: &MonitorInfo) -> Self {
+        Self {
+            width: monitor.width,
+            height: monitor.height,
+            work_x: monitor.work_x - monitor.x,
+            work_y: monitor.work_y - monitor.y,
+            work_width: monitor.work_width,
+            work_height: monitor.work_height,
+            scale_percent: (monitor.scale_factor * 100.0).round().max(1.0) as u32,
+        }
+    }
 }
 
 impl Default for LayoutRect {
@@ -104,6 +138,8 @@ pub struct AppConfig {
     pub title_rule: Option<MatchRule>,
     pub class_name: Option<String>,
     pub target_monitor_id: Option<String>,
+    #[serde(default)]
+    pub captured_display: Option<CapturedDisplay>,
     pub layout: LayoutRect,
     pub window_state: WindowStatePreference,
     pub launch_delay_seconds: u64,
@@ -138,6 +174,7 @@ impl AppConfig {
             title_rule: None,
             class_name: None,
             target_monitor_id: None,
+            captured_display: None,
             layout,
             window_state: WindowStatePreference::Normal,
             launch_delay_seconds: 0,
@@ -191,6 +228,8 @@ pub struct StartupSettings {
 #[serde(rename_all = "camelCase")]
 pub struct TraySettings {
     pub minimize_to_tray_on_close: bool,
+    #[serde(default)]
+    pub left_click_action: TrayClickAction,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -199,6 +238,10 @@ pub struct EnforcementSettings {
     pub enabled: bool,
     #[serde(default)]
     pub profile_id: Option<String>,
+    #[serde(default = "default_true")]
+    pub restore_on_desktop_reveal: bool,
+    #[serde(default = "default_true")]
+    pub restore_after_game_exit: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -270,6 +313,16 @@ pub struct RestoreResult {
     pub finished_at: String,
     pub monitor: Option<MonitorInfo>,
     pub results: Vec<AppRestoreResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeStatus {
+    pub automatic_restore_enabled: bool,
+    pub automatic_restore_profile_id: Option<String>,
+    pub automatic_restore_profile_name: Option<String>,
+    pub restoring: bool,
+    pub startup_registered: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -397,10 +450,13 @@ impl Default for WindowAutoLayoutConfig {
             },
             tray: TraySettings {
                 minimize_to_tray_on_close: true,
+                left_click_action: TrayClickAction::OpenWindow,
             },
             enforcement: EnforcementSettings {
                 enabled: false,
                 profile_id: Some(default_profile_id.clone()),
+                restore_on_desktop_reveal: true,
+                restore_after_game_exit: true,
             },
             profiles: vec![Profile {
                 id: default_profile_id,

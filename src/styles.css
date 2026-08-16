@@ -169,13 +169,65 @@ button:disabled {
   flex: 0 0 auto;
   z-index: 30;
   display: flex;
-  min-height: 64px;
+  min-height: 72px;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   padding: 10px 18px;
   border-bottom: 1px solid var(--wal-border);
   background: #0c1014;
+}
+
+.topbar-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.runtime-control {
+  display: flex;
+  width: 178px;
+  height: 44px;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  padding: 0 11px;
+  border: 1px solid #34424d;
+  border-radius: 6px;
+  color: #dbe5ea;
+  background: #11181e;
+  transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+.runtime-control:hover {
+  border-color: #52636f;
+  background: #172129;
+}
+
+.runtime-control-on {
+  border-color: rgba(66, 211, 146, 0.58);
+  color: #d8fae9;
+  background: rgba(66, 211, 146, 0.09);
+}
+
+.runtime-dot {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border: 1px solid #70808a;
+  border-radius: 50%;
+  background: #46545e;
+}
+
+.runtime-control-on .runtime-dot {
+  border-color: #79e8b4;
+  background: var(--wal-green);
+  box-shadow: 0 0 0 3px rgba(66, 211, 146, 0.12);
+}
+
+.restore-command {
+  min-width: 120px;
 }
 
 .workspace-content {
@@ -343,6 +395,17 @@ button:disabled {
 .button-danger:disabled,
 .icon-button:disabled {
   opacity: 0.38;
+}
+
+.button-primary:focus-visible,
+.button-secondary:focus-visible,
+.button-danger:focus-visible,
+.icon-button:focus-visible,
+.runtime-control:focus-visible,
+.nav-item:focus-visible,
+.segment:focus-visible {
+  outline: 2px solid rgba(67, 199, 231, 0.82);
+  outline-offset: 2px;
 }
 
 .toggle-row {
@@ -528,6 +591,15 @@ button:disabled {
   .topbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .topbar-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .runtime-control {
+    width: min(100%, 220px);
   }
 
   .workspace {

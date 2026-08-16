@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.1.28
+
+- Added a live tray command named `Restore windows now`, a checked automatic-restore status item, and an optional restore-on-left-click tray action.
+- Added persistent restore and automatic-state controls to every app view, with tray and window state kept in sync while a restore is running.
+- Added separate settings for Show Desktop recovery, post-game recovery, launching closed apps, and tray left-click behavior.
+- Saved display resolution, work area, and scale metadata with each captured window so layouts adapt cleanly to resolution or taskbar changes while staying exact on unchanged displays.
+- Replaced volatile `DISPLAY1` and `DISPLAY2` targets with hardware-backed monitor identities, including a guarded migration for layouts saved before Windows reordered display names.
+- Added bounded placement verification with repeated geometry checks, one-pixel tolerance, and clear expected-versus-actual failures when another app refuses its saved bounds.
+- Waited past undersized launch and update splash windows before placing the real app surface, preventing late startup windows from reclaiming old bounds.
+- Kept already-running minimized or tray-hidden apps recoverable when launching closed apps is disabled, and made startup restore honor that preference.
+- Made restore and capture results independent of optional log-file writes, tightened imported display metadata, and made layout-lock state changes transactional.
+- Kept the WebView unloaded in tray-only mode and destroyed it when the interface closes, leaving one low-priority native process with no idle polling.
+- Updated the interface, newest-first activity log, documentation screenshot, frontend dependencies, and release checks; frontend and Rust advisory scans report no known vulnerabilities.
+
+## 0.1.26
+
+- Limited OBS tray activation to truly hidden windows so a minimized OBS window is never toggled back into the tray.
+- Added an ordered OBS repaint with a one-shot client-surface check and one non-minimizing retry when the title bar appears but the Qt interface is still blank.
+- Prevented restore-generated window events from feeding back into the event-driven layout lock and stopped generic window restores from minimizing windows as a side effect.
+
+## 0.1.25
+
+- Made background restores show windows asynchronously without activating them or waiting on another app's UI thread.
+- Added a shared renderer refresh for restored windows, including windows that already match their saved rectangle after leaving the tray.
+- Replaced synchronous forced paints with a one-shot resize and queued full-surface repaint, preventing blank client areas without adding idle work.
+- Routed minimized OBS windows through OBS's native Qt tray restore handler before using the generic Win32 fallback.
+- Added a bounded, state-verified OBS minimize/restore recovery so Qt rebuilds and presents its docks instead of leaving a white client area.
+- Blocked OBS presentation recovery while a game or fullscreen app is foreground and restored the previous window only when focus stayed on OBS during the pulse.
+
+## 0.1.24
+
+- Made OpenLaunchDeck restores use its supported `--show` single-instance command, so a startup tray process exposes the existing window without creating a duplicate.
+- Removed OpenLaunchDeck background-only arguments during a layout restore while preserving unrelated custom launch arguments.
+- Added a no-focus Qt relayout and full child repaint after OBS is moved, returning it to the exact saved rectangle before the restore completes.
+
 ## 0.1.23
 
 - Serialized restore requests so startup, tray, dashboard, and event-lock restores cannot move the same windows at the same time.

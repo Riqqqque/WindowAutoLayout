@@ -3,13 +3,14 @@ import { useMemo, useState } from "react";
 import { Field, NumberInput, SelectInput, TextArea, Toggle } from "../components/Form";
 import { IconButton } from "../components/IconButton";
 import { api } from "../lib/api";
-import type { MonitorInfo, MonitorMissingBehavior, WindowAutoLayoutConfig } from "../lib/types";
+import type { MonitorInfo, MonitorMissingBehavior, RuntimeStatus, TrayClickAction, WindowAutoLayoutConfig } from "../lib/types";
 
 interface SettingsProps {
   config: WindowAutoLayoutConfig;
   monitors: MonitorInfo[];
   configPath?: string;
   logPath?: string;
+  runtimeStatus: RuntimeStatus;
   onConfigChange: (config: WindowAutoLayoutConfig) => void;
   onSave: () => void;
 }
@@ -20,7 +21,7 @@ const fallbackModes: Array<{ value: MonitorMissingBehavior; label: string }> = [
   { value: "nearestMatch", label: "Use nearest match" },
 ];
 
-export function SettingsPage({ config, monitors, configPath, logPath, onConfigChange, onSave }: SettingsProps) {
+export function SettingsPage({ config, monitors, configPath, logPath, runtimeStatus, onConfigChange, onSave }: SettingsProps) {
   const [importText, setImportText] = useState("");
   const [importError, setImportError] = useState<string | null>(null);
   const exportText = useMemo(() => JSON.stringify(config, null, 2), [config]);
@@ -62,7 +63,7 @@ export function SettingsPage({ config, monitors, configPath, logPath, onConfigCh
             </IconButton>
           </div>
 
-          <div className="mt-4 max-w-xs">
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
             <Field label="Startup delay seconds">
               <NumberInput
                 min={0}
@@ -71,11 +72,24 @@ export function SettingsPage({ config, monitors, configPath, logPath, onConfigCh
                 onChange={(event) => onConfigChange({ ...config, startup: { ...config.startup, delaySeconds: Number(event.target.value) } })}
               />
             </Field>
+            <Field label="Tray left click">
+              <SelectInput
+                value={config.tray.leftClickAction}
+                onChange={(event) => onConfigChange({
+                  ...config,
+                  tray: { ...config.tray, leftClickAction: event.target.value as TrayClickAction },
+                })}
+              >
+                <option value="openWindow">Open WindowAutoLayout</option>
+                <option value="restoreLayout">Restore windows now</option>
+              </SelectInput>
+            </Field>
           </div>
           <div className="mt-4 grid gap-2 md:grid-cols-2">
             <Toggle label="Start with Windows" checked={config.startup.enabled} onChange={(checked) => onConfigChange({ ...config, startup: { ...config.startup, enabled: checked } })} />
             <Toggle label="Start minimized to tray" checked={config.startup.startMinimizedToTray} onChange={(checked) => onConfigChange({ ...config, startup: { ...config.startup, startMinimizedToTray: checked } })} />
             <Toggle label="Restore on launch" checked={config.startup.restoreOnLaunch} onChange={(checked) => onConfigChange({ ...config, startup: { ...config.startup, restoreOnLaunch: checked } })} />
+            <Toggle label="Launch apps that are closed" checked={config.startup.launchMissingApps} onChange={(checked) => onConfigChange({ ...config, startup: { ...config.startup, launchMissingApps: checked } })} />
             <Toggle label="Close button goes to tray" checked={config.tray.minimizeToTrayOnClose} onChange={(checked) => onConfigChange({ ...config, tray: { ...config.tray, minimizeToTrayOnClose: checked } })} />
           </div>
         </section>
@@ -120,10 +134,29 @@ export function SettingsPage({ config, monitors, configPath, logPath, onConfigCh
               </SelectInput>
             </Field>
           </div>
+          <div className="mt-4 grid gap-2 md:grid-cols-2">
+            <Toggle
+              label="Restore after Show Desktop"
+              checked={config.enforcement.restoreOnDesktopReveal}
+              onChange={(checked) => onConfigChange({
+                ...config,
+                enforcement: { ...config.enforcement, restoreOnDesktopReveal: checked },
+              })}
+            />
+            <Toggle
+              label="Restore after leaving a game"
+              checked={config.enforcement.restoreAfterGameExit}
+              onChange={(checked) => onConfigChange({
+                ...config,
+                enforcement: { ...config.enforcement, restoreAfterGameExit: checked },
+              })}
+            />
+          </div>
           <div className="mt-4 grid gap-2 border-t border-[#27313a] pt-4 text-sm">
             <div className="flex items-center justify-between"><span className="text-[#91a0ab]">Game protection</span><span className="text-[#aef2d1]">Always on</span></div>
             <div className="flex items-center justify-between"><span className="text-[#91a0ab]">Input hooks</span><span className="text-[#aef2d1]">None</span></div>
-            <div className="flex items-center justify-between"><span className="text-[#91a0ab]">Background lock</span><span className="text-[#aef2d1]">Event driven</span></div>
+            <div className="flex items-center justify-between"><span className="text-[#91a0ab]">Automatic restore</span><span className={runtimeStatus.automaticRestoreEnabled ? "text-[#aef2d1]" : "text-[#91a0ab]"}>{runtimeStatus.automaticRestoreEnabled ? "On" : "Off"}</span></div>
+            <div className="flex items-center justify-between"><span className="text-[#91a0ab]">Windows startup</span><span className={runtimeStatus.startupRegistered ? "text-[#aef2d1]" : "text-[#91a0ab]"}>{runtimeStatus.startupRegistered ? "Registered" : "Off"}</span></div>
           </div>
         </section>
       </div>

@@ -26,16 +26,19 @@ WindowAutoLayout saves workspace profiles and restores them from the app, tray m
 
 ## What It Does
 
-- Saves app layouts per monitor using monitor-relative coordinates.
+- Saves app layouts against a hardware-backed monitor identity using monitor-relative physical-pixel coordinates plus captured display and work-area metadata.
 - Captures the visible windows on a selected monitor into the active profile.
 - Detects top-level windows with title, class name, process name, PID, bounds, visibility, minimized state, and executable path when Windows exposes it.
-- Restores a profile by launching missing apps, waiting for real matching windows, then moving and resizing them with Win32 APIs.
+- Restores a profile by launching missing apps, waiting past splash windows for the real matching surface, then moving and resizing it with Win32 APIs.
 - Pulls minimized and hidden tray windows forward before treating an app as missing.
-- Handles OBS in the tray by asking OBS through its tray icon path, then waiting for the real OBS window to repaint before applying the saved layout.
+- Handles OBS in the tray through its Qt tray path, applies the saved layout, then runs a bounded presentation recovery so the real interface is painted before restore finishes.
+- Uses OpenLaunchDeck's `--show` single-instance handoff to restore its existing startup tray process instead of launching a duplicate.
+- Refreshes restored window surfaces without activating them, so apps do not remain blank until clicked.
 - Keeps a selected profile protected with an event-driven lock that reacts to Show Desktop and game-to-desktop transitions without a polling loop.
 - Reopens the existing tray instance when WindowAutoLayout is launched a second time instead of creating a duplicate process.
 - Does not install global mouse hooks, keyboard hooks, raw-input listeners, or system-wide hotkeys.
-- Supports editable app presets, multiple profiles, startup restore, tray restore, logs, and JSON import/export.
+- Keeps a live `Restore windows now` command and checked automatic-restore state in the tray menu.
+- Supports editable app presets, multiple profiles, startup restore, configurable tray left-click behavior, logs, and JSON import/export.
 - Stores config and logs locally. No telemetry, accounts, analytics, or background network calls.
 
 ## Download
@@ -60,9 +63,22 @@ After install, WindowAutoLayout lives under the current Windows user profile and
 4. Open and arrange the apps you want in the profile.
 5. On Dashboard, pick the capture monitor and press Capture current layout.
 6. Fine-tune app matching on Apps or individual windows on Layout if needed.
-7. Press Restore from Dashboard, the tray menu, or startup restore.
+7. Press Restore windows now from any app view or the tray menu.
+8. Turn on Automatic restore if Show Desktop or returning from a game should recover that profile.
 
 For a complete setup walkthrough, see [docs/usage.md](docs/usage.md).
+
+## Tray Controls
+
+Right-click the tray icon for the current runtime controls:
+
+- `Restore windows now` runs the selected startup/default profile immediately.
+- `Automatic restore: On/Off` shows the real state and toggles recovery for the selected automatic profile.
+- `Open WindowAutoLayout` opens the existing single app instance.
+- `Open activity log` opens the local restore log.
+- `Exit` stops the tray process.
+
+Settings can make a normal left-click either open WindowAutoLayout or restore the layout immediately. While a restore is active, the tray label, tooltip, and app header show that state and block duplicate restore requests.
 
 ## OBS And Tray Apps
 
@@ -71,17 +87,23 @@ OBS can stay running in the system tray with Replay Buffer on. For the OBS app e
 - `Pull hidden/tray windows`
 - `Wake running tray apps`
 
-When OBS is fully hidden in the tray, Windows may report no normal main window. WindowAutoLayout handles that by sending OBS the same tray activation path a manual tray click uses, waiting for OBS to show and repaint, then moving it into the saved layout. That avoids starting a duplicate OBS process and avoids moving the window while OBS is still a blank shell.
+When OBS is fully hidden in the tray, Windows may report no normal main window. WindowAutoLayout handles that by sending OBS the same Qt tray activation path a manual tray click uses, waiting for the main window, applying the saved rectangle, and running a bounded state-verified presentation recovery. That avoids starting a duplicate OBS process and prevents the main frame from being left as a blank shell.
+
+Background restores never fake a click or leave each restored app focused. The generic path uses Windows' non-activating show behavior, applies the saved rectangle, and queues a one-shot surface repaint. OBS uses the bounded recovery above and returns to the previous window when focus did not change. No repaint timer runs after the restore completes.
 
 More details and recovery checks are in [docs/troubleshooting.md](docs/troubleshooting.md).
 
-## Layout Lock
+## Automatic Restore
 
-The lock button arms a Windows shell-event guard for the selected profile. It restores after Show Desktop and after leaving a game or fullscreen app, but it does not run a timer or repeatedly inspect every window. Background restores never launch missing apps, never force focus, and stop immediately if a game or fullscreen app becomes active again.
+The automatic control arms a Windows shell-event guard for the selected profile. Show Desktop recovery and post-game recovery can be toggled separately. The guard does not run a timer or repeatedly inspect every window. Background restores never launch missing apps, never force focus, and stop immediately if a game or fullscreen app becomes active again.
+
+Manual and startup restores can launch closed apps when `Launch apps that are closed` is enabled. Turning that setting off still allows an already-running minimized or tray-hidden app to be recovered.
 
 ## Game And Input Safety
 
-WindowAutoLayout does not register global hotkeys or low-level mouse/keyboard hooks. Tauri's optional raw device-event stream is explicitly disabled, automatic restores run below normal process priority, and the background guard waits on Windows accessibility events instead of polling. Window movement uses normal Win32 window-management calls and does not synthesize keyboard or mouse input.
+WindowAutoLayout does not register global hotkeys or low-level mouse/keyboard hooks. Tauri's optional raw device-event stream is explicitly filtered out, the process and restore worker run below normal priority, and the background guard blocks on Windows accessibility events instead of polling. Window movement uses normal Win32 window-management calls and does not synthesize keyboard or mouse input.
+
+The WebView interface is created only while the app window is open. Closing to tray destroys the WebView process tree and leaves the small native tray process running, so normal tray use does not carry a hidden browser runtime through a game.
 
 ## Startup Restore
 
@@ -91,7 +113,7 @@ Startup restore uses:
 "<installed WindowAutoLayout.exe>" --startup-restore
 ```
 
-The app can start minimized to tray, wait for configured startup delay seconds, restore the default startup profile, launch missing apps, then keep the layout locked if that option is enabled.
+The app can start minimized to tray, wait for the configured startup delay, restore the default profile, optionally launch closed apps, and keep automatic restore armed if it is enabled.
 
 ## Matching Rules
 
@@ -109,6 +131,7 @@ Useful notes:
 
 - OBS may take longer while plugins and docks load.
 - Discord uses multiple Electron processes and may appear late.
+- Startup and updater splash windows are ignored until a launch-ready surface appears.
 - Steam can show update or login windows before the main window.
 - Browser titles change with tabs.
 - Elevated apps may block moves from a normal, non-elevated WindowAutoLayout process.
@@ -137,7 +160,7 @@ npm run check
 cd src-tauri
 cargo fmt --check
 cargo check
-cargo test
+cargo test --all-targets
 cargo clippy --all-targets -- -D warnings
 cd ..
 npm audit --audit-level=moderate
@@ -174,9 +197,9 @@ scripts/              Local install/update helper
 Every version tag matching `v*` builds the Windows bundles and publishes installer assets to GitHub Releases.
 
 ```powershell
-git tag v0.1.23
+git tag v0.1.28
 git push origin main
-git push origin v0.1.23
+git push origin v0.1.28
 ```
 
 The workflow validates that the tag matches `package.json`, runs TypeScript, frontend audit, and Rust checks, builds the Tauri bundle, generates checksums, uploads CI artifacts, and publishes the release.

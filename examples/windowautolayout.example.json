@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 5,
-  "appVersion": "0.1.23",
+  "schemaVersion": 7,
+  "appVersion": "0.1.28",
   "global": {
     "defaultMonitorId": null,
     "monitorMissingBehavior": "nearestMatch"
@@ -14,11 +14,14 @@
     "launchMissingApps": true
   },
   "tray": {
-    "minimizeToTrayOnClose": true
+    "minimizeToTrayOnClose": true,
+    "leftClickAction": "openWindow"
   },
   "enforcement": {
     "enabled": false,
-    "profileId": "profile-streaming"
+    "profileId": "profile-streaming",
+    "restoreOnDesktopReveal": true,
+    "restoreAfterGameExit": true
   },
   "profiles": [
     {
@@ -37,6 +40,7 @@
           "titleRule": { "mode": "startsWith", "value": "OBS", "caseSensitive": false },
           "className": null,
           "targetMonitorId": null,
+          "capturedDisplay": null,
           "layout": { "x": 0, "y": 0, "width": 1280, "height": 720 },
           "windowState": "normal",
           "launchDelaySeconds": 0,
@@ -61,6 +65,7 @@
           "titleRule": null,
           "className": null,
           "targetMonitorId": null,
+          "capturedDisplay": null,
           "layout": { "x": 1280, "y": 0, "width": 640, "height": 720 },
           "windowState": "normal",
           "launchDelaySeconds": 0,
@@ -85,6 +90,7 @@
           "titleRule": { "mode": "contains", "value": "GitHub Desktop", "caseSensitive": false },
           "className": null,
           "targetMonitorId": null,
+          "capturedDisplay": null,
           "layout": { "x": 80, "y": 80, "width": 1280, "height": 900 },
           "windowState": "normal",
           "launchDelaySeconds": 0,

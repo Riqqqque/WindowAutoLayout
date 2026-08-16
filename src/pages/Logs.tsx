@@ -16,12 +16,14 @@ export function LogsPage({ logs, onRefresh, onClear, onOpen }: LogsProps) {
   const [query, setQuery] = useState("");
   const filtered = useMemo(() => {
     const value = query.trim().toLowerCase();
-    if (!value) return logs;
-    return logs.filter((entry) =>
-      [entry.severity, entry.profile, entry.app, entry.message, entry.timestamp]
-        .filter(Boolean)
-        .some((part) => String(part).toLowerCase().includes(value)),
-    );
+    const matching = value
+      ? logs.filter((entry) =>
+          [entry.severity, entry.profile, entry.app, entry.message, entry.timestamp]
+            .filter(Boolean)
+            .some((part) => String(part).toLowerCase().includes(value)),
+        )
+      : logs;
+    return [...matching].reverse();
   }, [logs, query]);
 
   function copyLogs() {

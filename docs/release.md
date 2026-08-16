@@ -18,7 +18,7 @@ Update these together for every release:
 The tag must match the package version:
 
 ```text
-package.json version 0.1.23 -> tag v0.1.23
+package.json version 0.1.28 -> tag v0.1.28
 ```
 
 ## Local Finish Pass
@@ -30,12 +30,14 @@ npm run check
 cd src-tauri
 cargo fmt --check
 cargo check
-cargo test
+cargo test --all-targets
 cargo clippy --all-targets -- -D warnings
 cd ..
 npm audit --audit-level=moderate
 npm run desktop:build
 ```
+
+Run a locked Rust advisory scan with a project-local `cargo-audit` binary when available. Warnings for dependencies that are not in the Windows target graph should be documented separately from actual vulnerabilities.
 
 Install or update this PC from the freshly built bundle:
 
@@ -51,6 +53,8 @@ The install helper verifies:
 - installed exe path
 - installed app version
 - launch smoke, unless `-NoLaunchSmoke` is used
+
+After the smoke launch, confirm tray-only mode has no WindowAutoLayout-owned WebView2 child, sample idle CPU, reopen and close the interface once, and verify the native process remains available from the tray.
 
 ## Manual Smoke
 
@@ -81,8 +85,8 @@ Commit the release changes, then push main and the version tag:
 
 ```powershell
 git push origin main
-git tag v0.1.23
-git push origin v0.1.23
+git tag v0.1.28
+git push origin v0.1.28
 ```
 
 The GitHub workflow:
@@ -111,7 +115,7 @@ WindowAutoLayout_<version>_x64_en-US.msi.sha256
 Verify the published release:
 
 ```powershell
-gh release view v0.1.23 --repo Riqqqque/WindowAutoLayout --json url,tagName,name,isDraft,isPrerelease,assets
+gh release view v0.1.28 --repo Riqqqque/WindowAutoLayout --json url,tagName,name,isDraft,isPrerelease,assets
 ```
 
 ## Troubleshooting Release Builds

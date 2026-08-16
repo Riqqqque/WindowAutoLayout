@@ -2,7 +2,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Field, NumberInput, SelectInput, TextArea, TextInput, Toggle } from "../components/Form";
 import { IconButton } from "../components/IconButton";
-import { formatArguments, newId, parseArguments, patchApp, patchProfile, statusText } from "../lib/helpers";
+import { capturedDisplayForMonitor, formatArguments, newId, parseArguments, patchApp, patchProfile, statusText } from "../lib/helpers";
 import type { AppConfig, MonitorInfo, Profile, TitleMatchMode, WindowAutoLayoutConfig, WindowStatePreference } from "../lib/types";
 
 interface AppsProps {
@@ -54,6 +54,7 @@ export function AppsPage({
       titleRule: null,
       className: null,
       targetMonitorId: null,
+      capturedDisplay: null,
       layout: { x: 80, y: 80, width: 960, height: 640 },
       windowState: "normal",
       launchDelaySeconds: 0,
@@ -177,7 +178,18 @@ export function AppsPage({
                 <TextInput value={app.workingDirectory ?? ""} onChange={(event) => updateApp(app.id, (app) => ({ ...app, workingDirectory: event.target.value || null }))} />
               </Field>
               <Field label="Target monitor">
-                <SelectInput value={app.targetMonitorId ?? ""} onChange={(event) => updateApp(app.id, (app) => ({ ...app, targetMonitorId: event.target.value || null }))}>
+                <SelectInput
+                  value={app.targetMonitorId ?? ""}
+                  onChange={(event) => {
+                    const monitorId = event.target.value || null;
+                    const targetMonitor = monitors.find((monitor) => monitor.id === monitorId);
+                    updateApp(app.id, (app) => ({
+                      ...app,
+                      targetMonitorId: monitorId,
+                      capturedDisplay: targetMonitor ? capturedDisplayForMonitor(targetMonitor) : null,
+                    }));
+                  }}
+                >
                   <option value="">Use profile target</option>
                   {missingTargetMonitor && <option value={missingTargetMonitor}>Missing: {missingTargetMonitor}</option>}
                   {monitors.map((monitor) => (

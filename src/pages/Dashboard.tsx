@@ -9,7 +9,7 @@ import {
   Trash2,
   UnlockKeyhole,
 } from "lucide-react";
-import type { AppConfig, MonitorInfo, Profile, RestoreResult, WindowAutoLayoutConfig, WindowInfo } from "../lib/types";
+import type { AppConfig, MonitorInfo, Profile, RestoreResult, RuntimeStatus, WindowAutoLayoutConfig, WindowInfo } from "../lib/types";
 import { monitorLabel, resolveProfileMonitor } from "../lib/helpers";
 import { StatusBadge } from "../components/StatusBadge";
 import { IconButton } from "../components/IconButton";
@@ -23,7 +23,7 @@ interface DashboardProps {
   lastRestore?: RestoreResult | null;
   validation: string[];
   busy: boolean;
-  layoutLocked: boolean;
+  runtimeStatus: RuntimeStatus;
   captureMonitorId: string;
   onProfileChange: (profileId: string) => void;
   onRestore: () => void;
@@ -42,7 +42,7 @@ export function Dashboard({
   lastRestore,
   validation,
   busy,
-  layoutLocked,
+  runtimeStatus,
   captureMonitorId,
   onProfileChange,
   onRestore,
@@ -56,13 +56,15 @@ export function Dashboard({
   const monitor = resolvedMonitor.monitor;
   const visibleWindows = windows.filter((window) => window.isVisible && !window.isMinimized).length;
   const hiddenWindows = windows.filter((window) => !window.isVisible || window.isMinimized).length;
+  const profileIsAutomatic = runtimeStatus.automaticRestoreEnabled
+    && runtimeStatus.automaticRestoreProfileId === profile.id;
 
   return (
     <div className="page-stack">
       <section className="panel-raised p-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
-            <div className="eyebrow">Workspace command</div>
+            <div className="eyebrow">Current layout</div>
             <h1 className="mt-1 truncate text-xl font-semibold text-zinc-50">{profile.name}</h1>
             <p className="mt-1 max-w-2xl text-sm leading-5 text-[#91a0ab]">
               {profile.description?.trim() || `${profile.apps.length} saved apps`}
@@ -78,15 +80,19 @@ export function Dashboard({
             </SelectInput>
             <button className="button-primary" onClick={onRestore} disabled={busy}>
               <Play size={16} />
-              Restore
+              Restore windows now
             </button>
             <button
-              className={layoutLocked ? "button-secondary border-[#42d392]/55 text-[#aef2d1]" : "button-secondary"}
+              className={profileIsAutomatic ? "button-secondary border-[#42d392]/55 text-[#aef2d1]" : "button-secondary"}
               onClick={onLockToggle}
               disabled={busy}
             >
-              {layoutLocked ? <LockKeyhole size={16} /> : <UnlockKeyhole size={16} />}
-              {layoutLocked ? "Locked" : "Lock"}
+              {profileIsAutomatic ? <LockKeyhole size={16} /> : <UnlockKeyhole size={16} />}
+              {profileIsAutomatic
+                ? "Automatic on"
+                : runtimeStatus.automaticRestoreEnabled
+                  ? "Use automatically"
+                  : "Automatic off"}
             </button>
             <IconButton label="Refresh" onClick={onRefresh} disabled={busy}>
               <RefreshCw size={16} />
@@ -121,8 +127,8 @@ export function Dashboard({
       <section className="metric-strip">
         <Metric label="Displays" value={String(monitors.length)} detail={monitor ? monitorLabel(monitor) : "Target missing"} />
         <Metric label="Windows ready" value={String(visibleWindows)} detail={`${hiddenWindows} hidden or minimized`} />
-        <Metric label="Profile apps" value={String(profile.apps.length)} detail={profile.name} />
-        <Metric label="Startup" value={config.startup.enabled ? "On" : "Off"} detail={config.startup.enabled ? "Tray resident" : "Not registered"} />
+        <Metric label="Automatic restore" value={runtimeStatus.automaticRestoreEnabled ? "On" : "Off"} detail={runtimeStatus.automaticRestoreProfileName ?? "Manual only"} />
+        <Metric label="Startup" value={runtimeStatus.startupRegistered ? "On" : "Off"} detail={runtimeStatus.startupRegistered ? "Tray resident" : "Not registered"} />
       </section>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_330px]">
@@ -161,8 +167,8 @@ export function Dashboard({
                 ))
               )}
               <div className="mt-2 flex items-center justify-between border-t border-[#27313a] pt-3 text-sm">
-                <span className="text-[#91a0ab]">Event lock</span>
-                <span className={layoutLocked ? "text-[#aef2d1]" : "text-[#91a0ab]"}>{layoutLocked ? "Active" : "Off"}</span>
+                <span className="text-[#91a0ab]">Automatic restore</span>
+                <span className={runtimeStatus.automaticRestoreEnabled ? "text-[#aef2d1]" : "text-[#91a0ab]"}>{runtimeStatus.automaticRestoreEnabled ? "On" : "Off"}</span>
               </div>
               <div className="flex items-center justify-between text-sm">
                 <span className="text-[#91a0ab]">Input hooks</span>
@@ -184,7 +190,7 @@ export function Dashboard({
                     {item.isPrimary && <span className="text-[11px] font-semibold text-[#bcecf5]">Primary</span>}
                   </div>
                   <div className="mt-1 pl-[23px] text-xs text-[#71818c]">
-                    {item.width} x {item.height} at {item.x}, {item.y}
+                    {item.width} x {item.height} at {item.x}, {item.y} / {Math.round(item.scaleFactor * 100)}%
                   </div>
                 </div>
               ))}

@@ -630,6 +630,7 @@ mod tests {
             title_rule: None,
             class_name: None,
             target_monitor_id: None,
+            captured_display: None,
             layout: LayoutRect::default(),
             window_state: WindowStatePreference::Normal,
             launch_delay_seconds: 0,

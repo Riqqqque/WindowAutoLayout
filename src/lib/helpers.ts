@@ -1,4 +1,4 @@
-import type { AppConfig, LayoutRect, MonitorInfo, Profile, WindowAutoLayoutConfig } from "./types";
+import type { AppConfig, CapturedDisplay, LayoutRect, MonitorInfo, Profile, WindowAutoLayoutConfig } from "./types";
 
 export function newId(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
@@ -40,6 +40,18 @@ export function monitorLabel(monitor?: MonitorInfo | null) {
   return `${monitor.name} ${monitor.width}x${monitor.height}${monitor.isPrimary ? " primary" : ""}`;
 }
 
+export function capturedDisplayForMonitor(monitor: MonitorInfo): CapturedDisplay {
+  return {
+    width: monitor.width,
+    height: monitor.height,
+    workX: monitor.workX - monitor.x,
+    workY: monitor.workY - monitor.y,
+    workWidth: monitor.workWidth,
+    workHeight: monitor.workHeight,
+    scalePercent: Math.round(monitor.scaleFactor * 100),
+  };
+}
+
 export function resolveMonitor(
   monitors: MonitorInfo[],
   preferredId?: string | null,
@@ -73,7 +85,7 @@ export function resolveProfileMonitor(config: WindowAutoLayoutConfig, profile: P
       right: Math.max(current.right, app.layout.x + app.layout.width),
       bottom: Math.max(current.bottom, app.layout.y + app.layout.height),
     }),
-    { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity },
+    { left: 0, top: 0, right: 0, bottom: 0 },
   );
   const targetSize = profile.apps.length
     ? { width: bounds.right - bounds.left, height: bounds.bottom - bounds.top }

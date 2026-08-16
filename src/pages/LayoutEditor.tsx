@@ -1,9 +1,9 @@
 import { AlignHorizontalSpaceAround, Columns2, Maximize2, Rows2, Trash2 } from "lucide-react";
-import { Field, NumberInput, Toggle } from "../components/Form";
+import { Field, NumberInput, SelectInput, Toggle } from "../components/Form";
 import { IconButton } from "../components/IconButton";
 import { MonitorPreview } from "../components/MonitorPreview";
 import { WindowPicker } from "../components/WindowPicker";
-import { clampRect, patchApp, patchProfile, resolveMonitor, resolveProfileMonitor } from "../lib/helpers";
+import { capturedDisplayForMonitor, clampRect, patchApp, patchProfile, resolveMonitor, resolveProfileMonitor } from "../lib/helpers";
 import type { LayoutRect, MonitorInfo, Profile, WindowAutoLayoutConfig, WindowInfo } from "../lib/types";
 
 interface LayoutEditorProps {
@@ -51,9 +51,21 @@ export function LayoutEditorPage({
       : resolveProfileMonitor(config, profile, monitors).monitor) ??
     monitors.find((item) => !item.isPrimary) ??
     monitors[0];
+  const appsOnMonitor = monitor
+    ? profile.apps.filter((item) => {
+        const resolved = item.targetMonitorId
+          ? resolveMonitor(monitors, item.targetMonitorId, config.global.monitorMissingBehavior, item.layout).monitor
+          : resolveProfileMonitor(config, profile, monitors).monitor;
+        return resolved?.id === monitor.id;
+      })
+    : [];
 
   function updateRect(appId: string, rect: LayoutRect) {
-    onConfigChange(patchApp(config, profile.id, appId, (app) => ({ ...app, layout: clampRect(rect, monitor) })));
+    onConfigChange(patchApp(config, profile.id, appId, (app) => ({
+      ...app,
+      layout: clampRect(rect, monitor),
+      capturedDisplay: monitor ? capturedDisplayForMonitor(monitor) : app.capturedDisplay,
+    })));
   }
 
   function setSelectedRect(rect: LayoutRect) {
@@ -71,6 +83,7 @@ export function LayoutEditorPage({
         apps: profile.apps.map((app, index) => ({
           ...app,
           targetMonitorId: monitor.id,
+          capturedDisplay: capturedDisplayForMonitor(monitor),
           layout: {
             x: index * width,
             y: 0,
@@ -88,7 +101,9 @@ export function LayoutEditorPage({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="section-heading">Layout canvas</h1>
-            <div className="mt-1 text-xs text-[#71818c]">{monitor ? `${monitor.name} / ${monitor.width} x ${monitor.height}` : "No display"}</div>
+            <div className="mt-1 text-xs text-[#71818c]">
+              {monitor ? `${monitor.name} / ${monitor.width} x ${monitor.height} / ${Math.round(monitor.scaleFactor * 100)}%` : "No display"}
+            </div>
           </div>
           <div className="flex gap-2">
             <IconButton label="Fill left half" disabled={!app || !monitor} onClick={() => app && monitor && setSelectedRect({ x: 0, y: 0, width: monitor.width / 2, height: monitor.height })}>
@@ -109,7 +124,7 @@ export function LayoutEditorPage({
         <div className="mt-4">
           <MonitorPreview
             monitor={monitor}
-            apps={profile.apps}
+            apps={appsOnMonitor}
             selectedAppId={app?.id}
             showGrid={showGrid}
             onSelect={onSelectedAppChange}
@@ -121,10 +136,21 @@ export function LayoutEditorPage({
       <aside className="grid gap-4">
         <section className="panel p-4">
           <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="eyebrow">Selected app</div>
-              <h2 className="mt-1 truncate text-base font-semibold text-zinc-100">{app?.displayName ?? "None"}</h2>
-            </div>
+            <Field label="Selected app">
+              <SelectInput
+                value={app?.id ?? ""}
+                onChange={(event) => onSelectedAppChange(event.target.value)}
+                disabled={profile.apps.length === 0}
+                className="min-w-48"
+              >
+                {profile.apps.length === 0 && <option value="">No apps in this profile</option>}
+                {profile.apps.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.displayName}
+                  </option>
+                ))}
+              </SelectInput>
+            </Field>
             <div className="flex items-center gap-2">
               {app && (
                 <IconButton label={`Remove ${app.displayName} from profile`} onClick={() => onRemoveApp(app.id)} variant="danger">

@@ -18,7 +18,7 @@ use windows::Win32::{
 
 use crate::{
     layout_lock, logging,
-    models::{LogSeverity, RestoreStatus, WindowInfo},
+    models::{LogSeverity, RestoreStatus, WindowAutoLayoutConfig, WindowInfo},
     performance, profiles,
     state::AppState,
     windows_enum,
@@ -89,9 +89,15 @@ struct GuardTiming {
     last_restore: Option<Instant>,
 }
 
+#[derive(Clone, Copy)]
+enum RestoreTrigger {
+    DesktopReveal,
+    GameExit,
+}
+
 impl DesktopGuard {
     fn handle_event(&self, event: u32, hwnd: HWND) {
-        if hwnd.0.is_null() {
+        if hwnd.0.is_null() || profiles::restore_events_suppressed() {
             return;
         }
 
@@ -126,9 +132,9 @@ impl DesktopGuard {
         };
 
         if desktop_reveal {
-            self.request_restore(DESKTOP_RESTORE_DELAY);
+            self.request_restore(DESKTOP_RESTORE_DELAY, RestoreTrigger::DesktopReveal);
         } else if left_latency_sensitive {
-            self.request_restore(GAME_EXIT_RESTORE_DELAY);
+            self.request_restore(GAME_EXIT_RESTORE_DELAY, RestoreTrigger::GameExit);
         }
     }
 
@@ -139,8 +145,22 @@ impl DesktopGuard {
         timing.last_minimize_start = Some(Instant::now());
     }
 
-    fn request_restore(&self, delay: Duration) {
+    fn request_restore(&self, delay: Duration, trigger: RestoreTrigger) {
         if !layout_lock::enabled(&self.app).unwrap_or(false) {
+            return;
+        }
+        let trigger_enabled = self
+            .app
+            .try_state::<AppState>()
+            .and_then(|state| {
+                state
+                    .config
+                    .lock()
+                    .ok()
+                    .map(|config| restore_trigger_enabled(&config, trigger))
+            })
+            .unwrap_or(false);
+        if !trigger_enabled {
             return;
         }
 
@@ -202,7 +222,8 @@ impl DesktopGuard {
                 }
             }
 
-            if !layout_lock::enabled(&self.app).unwrap_or(false)
+            if profiles::restore_events_suppressed()
+                || !layout_lock::enabled(&self.app).unwrap_or(false)
                 || performance::foreground_is_latency_sensitive()
             {
                 continue;
@@ -226,6 +247,13 @@ impl DesktopGuard {
                 }
             }
         }
+    }
+}
+
+fn restore_trigger_enabled(config: &WindowAutoLayoutConfig, trigger: RestoreTrigger) -> bool {
+    match trigger {
+        RestoreTrigger::DesktopReveal => config.enforcement.restore_on_desktop_reveal,
+        RestoreTrigger::GameExit => config.enforcement.restore_after_game_exit,
     }
 }
 
@@ -348,6 +376,19 @@ mod tests {
         let window = test_window("WindowAutoLayout.exe", "WindowAutoLayout", "Tauri Window");
 
         assert!(is_own_window(&window));
+    }
+
+    #[test]
+    fn trigger_preferences_are_independent() {
+        let mut config = WindowAutoLayoutConfig::default();
+        config.enforcement.restore_on_desktop_reveal = false;
+        config.enforcement.restore_after_game_exit = true;
+
+        assert!(!restore_trigger_enabled(
+            &config,
+            RestoreTrigger::DesktopReveal
+        ));
+        assert!(restore_trigger_enabled(&config, RestoreTrigger::GameExit));
     }
 
     fn test_window(process_name: &str, title: &str, class_name: &str) -> WindowInfo {

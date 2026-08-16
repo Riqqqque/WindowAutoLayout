@@ -2,23 +2,26 @@ import {
   AppWindow,
   Boxes,
   FileText,
-  LockKeyhole,
   LayoutDashboard,
+  LoaderCircle,
   PanelsTopLeft,
   RefreshCw,
+  RotateCcw,
   Save,
   Settings,
   ShieldCheck,
 } from "lucide-react";
+import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { clsx } from "clsx";
-import { api } from "./lib/api";
+import { api, isTauriRuntime } from "./lib/api";
 import { activeProfile, patchProfile, resolveProfileMonitor, statusText } from "./lib/helpers";
 import type {
   AppConfig,
   LogEntry,
   MonitorInfo,
   RestoreResult,
+  RuntimeStatus,
   WindowAutoLayoutConfig,
   WindowInfo,
 } from "./lib/types";
@@ -40,6 +43,14 @@ const navItems: Array<{ id: Page; label: string; icon: typeof LayoutDashboard }>
   { id: "settings", label: "Settings", icon: Settings },
 ];
 
+const initialRuntimeStatus: RuntimeStatus = {
+  automaticRestoreEnabled: false,
+  automaticRestoreProfileId: null,
+  automaticRestoreProfileName: null,
+  restoring: false,
+  startupRegistered: false,
+};
+
 export default function App() {
   const [page, setPage] = useState<Page>("dashboard");
   const [config, setConfig] = useState<WindowAutoLayoutConfig | null>(null);
@@ -58,7 +69,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
-  const [layoutLocked, setLayoutLocked] = useState(false);
+  const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>(initialRuntimeStatus);
   const [captureMonitorId, setCaptureMonitorId] = useState<string | null>(null);
   const workspaceContentRef = useRef<HTMLDivElement>(null);
 
@@ -70,9 +81,12 @@ export default function App() {
     }
     return resolveProfileMonitor(config, profile, monitors).monitor?.id ?? monitors[0]?.id ?? "";
   }, [captureMonitorId, config, monitors, profile]);
+  const selectedProfileIsAutomatic = runtimeStatus.automaticRestoreEnabled
+    && runtimeStatus.automaticRestoreProfileId === profile?.id;
+  const operationBusy = busy || runtimeStatus.restoring;
 
   const refresh = useCallback(async () => {
-    const [nextConfig, nextMonitors, nextWindows, nextLogs, nextPresets, nextConfigPath, nextLogPath, nextValidation, nextLayoutLocked] =
+    const [nextConfig, nextMonitors, nextWindows, nextLogs, nextPresets, nextConfigPath, nextLogPath, nextValidation, nextRuntimeStatus] =
       await Promise.all([
         api.getConfig(),
         api.monitors(),
@@ -82,7 +96,7 @@ export default function App() {
         api.configPath(),
         api.logPath(),
         api.validateConfig(),
-        api.layoutLockStatus(),
+        api.runtimeStatus(),
       ]);
     setConfig(nextConfig);
     setMonitors(nextMonitors);
@@ -92,7 +106,7 @@ export default function App() {
     setConfigPath(nextConfigPath);
     setLogPath(nextLogPath);
     setValidation(nextValidation);
-    setLayoutLocked(nextLayoutLocked);
+    setRuntimeStatus(nextRuntimeStatus);
     setSelectedProfileId((current) =>
       current && nextConfig.profiles.some((item) => item.id === current)
         ? current
@@ -109,6 +123,31 @@ export default function App() {
   useEffect(() => {
     refresh().catch((error) => setMessage(String(error)));
   }, [refresh]);
+
+  useEffect(() => {
+    if (!isTauriRuntime) return undefined;
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    listen<RuntimeStatus>("runtime-status-changed", (event) => {
+      setRuntimeStatus(event.payload);
+      setConfig((current) => current ? {
+        ...current,
+        enforcement: {
+          ...current.enforcement,
+          enabled: event.payload.automaticRestoreEnabled,
+          profileId: event.payload.automaticRestoreProfileId ?? current.enforcement.profileId,
+        },
+      } : current);
+    }).then((dispose) => {
+      if (cancelled) dispose();
+      else unlisten = dispose;
+    }).catch((error) => setMessage(String(error)));
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
 
   useEffect(() => {
     if (!profile) return;
@@ -132,7 +171,7 @@ export default function App() {
       const saved = dirty ? await api.saveConfig(config) : config;
       setConfig(saved);
       setDirty(false);
-      const result = await api.restoreProfile(profile.id, true);
+      const result = await api.restoreProfile(profile.id, saved.startup.launchMissingApps);
       setLastRestore(result);
       setLogs(await api.logs());
       setMessage(`Restore finished: ${statusText(result.status)}`);
@@ -186,20 +225,21 @@ export default function App() {
       const saved = dirty ? await api.saveConfig(config) : config;
       setConfig(saved);
       setDirty(false);
-      const enabling = !layoutLocked;
+      const enabling = !selectedProfileIsAutomatic;
+      const switchingProfile = runtimeStatus.automaticRestoreEnabled && enabling;
       if (enabling) {
-        const result = await api.restoreProfile(profile.id, true);
+        const result = await api.restoreProfile(profile.id, saved.startup.launchMissingApps);
         setLastRestore(result);
         if (["paused", "failed", "monitorMissing"].includes(result.status)) {
-          setMessage(`Layout lock not enabled: ${statusText(result.status)}`);
+          setMessage(`Automatic restore not enabled: ${statusText(result.status)}`);
           return;
         }
       }
       const enabled = await api.setLayoutLock(enabling, profile.id);
       setConfig({ ...saved, enforcement: { ...saved.enforcement, enabled, profileId: profile.id } });
-      setLayoutLocked(enabled);
+      setRuntimeStatus(await api.runtimeStatus());
       setLogs(await api.logs());
-      setMessage(enabled ? "Layout lock on" : "Layout lock off");
+      setMessage(enabled ? (switchingProfile ? `Automatic restore now uses ${profile.name}` : "Automatic restore on") : "Automatic restore off");
     } catch (error) {
       setMessage(String(error));
     } finally {
@@ -296,8 +336,12 @@ export default function App() {
             <div className="eyebrow">Active profile</div>
             <div className="mt-1 truncate text-sm font-medium text-zinc-100">{profile.name}</div>
             <div className="mt-2 flex items-center gap-2 text-xs text-[#8fa0aa]">
-              <span className={`h-2 w-2 rounded-full ${layoutLocked ? "bg-[#42d392]" : "bg-[#50606b]"}`} />
-              {layoutLocked ? "Event lock active" : "Event lock off"}
+              <span className={`h-2 w-2 rounded-full ${selectedProfileIsAutomatic ? "bg-[#42d392]" : runtimeStatus.automaticRestoreEnabled ? "bg-[#f1b84b]" : "bg-[#50606b]"}`} />
+              {selectedProfileIsAutomatic
+                ? "Automatic restore on"
+                : runtimeStatus.automaticRestoreEnabled
+                  ? `On for ${runtimeStatus.automaticRestoreProfileName ?? "another profile"}`
+                  : "Automatic restore off"}
             </div>
           </div>
 
@@ -332,33 +376,59 @@ export default function App() {
               <div className="truncate text-[15px] font-semibold text-zinc-100">{navItems.find((item) => item.id === page)?.label}</div>
               <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-[#82919c]">
                 <span>{message ?? (dirty ? "Unsaved changes" : `${profile.apps.length} apps in ${profile.name}`)}</span>
-                {layoutLocked && (
+                {runtimeStatus.restoring && (
                   <>
                     <span aria-hidden="true">/</span>
                     <span className="inline-flex items-center gap-1 text-[#aef2d1]">
-                      <LockKeyhole size={12} />
-                      event lock
+                      <LoaderCircle className="animate-spin" size={12} />
+                      restoring
                     </span>
                   </>
                 )}
               </div>
             </div>
-            <div className="flex gap-2">
+            <div className="topbar-actions">
               <button
-                className="button-secondary"
-                onClick={refreshFromUi}
-                disabled={busy}
+                className={`runtime-control ${selectedProfileIsAutomatic ? "runtime-control-on" : ""}`}
+                onClick={toggleLayoutLock}
+                disabled={operationBusy}
+                aria-pressed={selectedProfileIsAutomatic}
+                title={selectedProfileIsAutomatic ? "Turn automatic restore off" : `Use ${profile.name} for automatic restore`}
               >
-                <RefreshCw size={15} />
-                Refresh
+                <span className="runtime-dot" aria-hidden="true" />
+                <span className="min-w-0 text-left">
+                  <span className="block text-[10px] font-semibold uppercase text-[#7f909b]">Automatic restore</span>
+                  <span className="block truncate text-xs font-semibold">
+                    {runtimeStatus.automaticRestoreEnabled
+                      ? runtimeStatus.automaticRestoreProfileName ?? "On"
+                      : "Off"}
+                  </span>
+                </span>
               </button>
               <button
-                className="button-primary"
+                className="icon-button"
+                onClick={refreshFromUi}
+                disabled={operationBusy}
+                aria-label="Refresh app data"
+                title="Refresh app data"
+              >
+                <RefreshCw size={15} />
+              </button>
+              <button
+                className="button-secondary"
                 onClick={saveConfig}
-                disabled={busy || !dirty}
+                disabled={operationBusy || !dirty}
               >
                 <Save size={15} />
                 Save
+              </button>
+              <button
+                className="button-primary restore-command"
+                onClick={restoreSelected}
+                disabled={operationBusy}
+              >
+                {runtimeStatus.restoring ? <LoaderCircle className="animate-spin" size={16} /> : <RotateCcw size={16} />}
+                {runtimeStatus.restoring ? "Restoring" : "Restore now"}
               </button>
             </div>
           </header>
@@ -372,7 +442,7 @@ export default function App() {
                 windows={windows}
                 lastRestore={lastRestore?.profileId === profile.id ? lastRestore : null}
                 validation={validation}
-                busy={busy}
+                busy={operationBusy}
                 captureMonitorId={effectiveCaptureMonitorId}
                 onProfileChange={(id) => {
                   setSelectedProfileId(id);
@@ -382,7 +452,7 @@ export default function App() {
                 }}
                 onRestore={restoreSelected}
                 onLockToggle={toggleLayoutLock}
-                layoutLocked={layoutLocked}
+                runtimeStatus={runtimeStatus}
                 onRefresh={refreshFromUi}
                 onCaptureMonitorChange={setCaptureMonitorId}
                 onCaptureCurrentLayout={captureCurrentLayout}
@@ -445,6 +515,7 @@ export default function App() {
                 monitors={monitors}
                 configPath={configPath}
                 logPath={logPath}
+                runtimeStatus={runtimeStatus}
                 onConfigChange={updateConfig}
                 onSave={saveConfig}
               />
